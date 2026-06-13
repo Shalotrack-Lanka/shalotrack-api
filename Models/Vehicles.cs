@@ -1,7 +1,11 @@
-﻿namespace ShaloTrack_API.Models;
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace ShaloTrack_API.Models;
 
 public class Vehicle
 {
+    //primary key
+    [Key]
     public Guid VehicleId { get; set; }
     public Guid CustomerId { get; set; }
     public string VehicleNumber { get; set; } = string.Empty;

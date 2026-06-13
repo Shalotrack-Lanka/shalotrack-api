@@ -1,9 +1,12 @@
 ﻿using ShaloTrack_API.Enums;
+using System.ComponentModel.DataAnnotations;
 
 namespace ShaloTrack_API.Models;
 
 public class Customer
 {
+    //primary key
+    [Key] 
     public Guid CustomerId { get; set; }
     public string FullName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;

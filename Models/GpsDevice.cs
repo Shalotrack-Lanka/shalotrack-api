@@ -1,9 +1,12 @@
 ﻿using ShaloTrack_API.Enums;
+using System.ComponentModel.DataAnnotations;
 
 namespace ShaloTrack_API.Models;
 
 public class GpsDevice
 {
+    //primary key
+    [Key]
     public Guid DeviceId { get; set; }
     public string ImeiNumber { get; set; } = string.Empty;
     public string? SimNumber { get; set; }
@@ -19,5 +22,5 @@ public class GpsDevice
     public ICollection<DeviceAssignment> DeviceAssignments { get; set; }
         = new List<DeviceAssignment>();
 
-    public DeviceStatus? DeviceStatus { get; set; }
+    
 }

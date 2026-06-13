@@ -1,9 +1,12 @@
 ﻿using ShaloTrack_API.Enums;
+using System.ComponentModel.DataAnnotations;
 
 namespace ShaloTrack_API.Models;
 
 public class DeviceStatus
 {
+    //primary key
+    [Key]
     public long StatusId { get; set; }
     public Guid DeviceId { get; set; }
     public bool IsOnline { get; set; }
