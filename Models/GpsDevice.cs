@@ -19,8 +19,17 @@ public class GpsDevice
     public DateTime? InstalledAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    //Connecting the interface
     public ICollection<DeviceAssignment> DeviceAssignments { get; set; }
         = new List<DeviceAssignment>();
 
-    
+    public ICollection<RawPacket> RawPackets { get; set; }
+    = new List<RawPacket>();
+
+    public ICollection<GpsTracking> GpsTrackings { get; set; }
+        = new List<GpsTracking>();
+
+    public CurrentLocation? CurrentLocation { get; set; }
+
 }

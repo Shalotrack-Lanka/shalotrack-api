@@ -10,10 +10,44 @@ public class ShaloTrackDbContext : DbContext
         : base(options)
     {
     }
+
     //Tables
+
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Vehicle> Vehicles => Set<Vehicle>();
     public DbSet<GpsDevice> GpsDevices => Set<GpsDevice>();
     public DbSet<DeviceAssignment> DeviceAssignments => Set<DeviceAssignment>();
     public DbSet<DeviceStatus> DeviceStatuses => Set<DeviceStatus>();
+    public DbSet<RawPacket> RawPackets => Set<RawPacket>();
+    public DbSet<GpsTracking> GpsTrackings => Set<GpsTracking>();
+    public DbSet<CurrentLocation> CurrentLocations => Set<CurrentLocation>();
+
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<CurrentLocation>()
+            .HasKey(c => c.DeviceId);
+
+        modelBuilder.Entity<CurrentLocation>()
+            .HasOne(c => c.Device)
+            .WithOne(d => d.CurrentLocation)
+            .HasForeignKey<CurrentLocation>(c => c.DeviceId);
+
+        modelBuilder.Entity<CurrentLocation>()
+            .HasOne(c => c.Vehicle)
+            .WithOne(v => v.CurrentLocation)
+            .HasForeignKey<CurrentLocation>(c => c.VehicleId);
+
+        modelBuilder.Entity<RawPacket>()
+            .HasOne(r => r.Device)
+            .WithMany(d => d.RawPackets)
+            .HasForeignKey(r => r.DeviceId);
+
+        modelBuilder.Entity<GpsTracking>()
+            .HasOne(g => g.Device)
+            .WithMany(d => d.GpsTrackings)
+            .HasForeignKey(g => g.DeviceId);
+    }
 }

@@ -20,6 +20,7 @@ public class Vehicle
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public Customer Customer { get; set; } = null!;
+    public CurrentLocation? CurrentLocation { get; set; }
     public ICollection<DeviceAssignment> DeviceAssignments { get; set; }
         = new List<DeviceAssignment>();
 }
