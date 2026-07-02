@@ -3,6 +3,7 @@
 public interface IUnitOfWork
 {
     ICustomerRepository Customers { get; }
+    IVehicleRepository Vehicles { get; }
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();

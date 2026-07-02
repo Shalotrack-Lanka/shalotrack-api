@@ -11,13 +11,16 @@ public class UnitOfWork : IUnitOfWork
     private IDbContextTransaction? _transaction;
 
     public ICustomerRepository Customers { get; }
+    public IVehicleRepository Vehicles { get; }
 
     public UnitOfWork(
         ShaloTrackDbContext context,
-        ICustomerRepository customerRepository)
+        ICustomerRepository customerRepository,
+        IVehicleRepository vehicleRepository)
     {
         _context = context;
         Customers = customerRepository;
+        Vehicles = vehicleRepository;
     }
 
     public async Task<int> SaveChangesAsync()

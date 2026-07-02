@@ -1,37 +1,21 @@
-using Microsoft.EntityFrameworkCore;
-using ShaloTrack_API.Data;
-
-using ShaloTrack_API.Repositories.Interfaces;
-using ShaloTrack_API.Repositories.Implementations;
-
-using ShaloTrack_API.Services.Interfaces;
-using ShaloTrack_API.Services.Implementations;
+using ShaloTrack_API.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Database
-builder.Services.AddDbContext<ShaloTrackDbContext>(options =>
-    options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection")));
+// Infrastructure
+builder.Services.AddDatabaseServices(builder.Configuration);
+builder.Services.AddRepositoryServices();
+builder.Services.AddBusinessServices();
 
-// Repositories
-builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
-builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
-
-// Services
-builder.Services.AddScoped<ICustomerService, CustomerService>();
-
+// ASP.NET Core
 builder.Services.AddControllers();
-
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerDocumentation();
 
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerDocumentation();
 }
 
 app.UseHttpsRedirection();
