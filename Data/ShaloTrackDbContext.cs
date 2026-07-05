@@ -49,5 +49,15 @@ public class ShaloTrackDbContext : DbContext
             .HasOne(g => g.Device)
             .WithMany(d => d.GpsTrackings)
             .HasForeignKey(g => g.DeviceId);
+
+        modelBuilder.Entity<DeviceAssignment>()
+            .HasOne(a => a.Vehicle)
+            .WithMany(v => v.DeviceAssignments)
+            .HasForeignKey(a => a.VehicleId);
+
+        modelBuilder.Entity<DeviceAssignment>()
+            .HasOne(a => a.Device)
+            .WithMany(d => d.DeviceAssignments)
+            .HasForeignKey(a => a.DeviceId);
     }
 }

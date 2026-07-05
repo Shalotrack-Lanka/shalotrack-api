@@ -12,6 +12,7 @@ public static class RepositoryServiceExtensions
         services.AddScoped<ICustomerRepository, CustomerRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IGpsDeviceRepository, GpsDeviceRepository>();
+        services.AddScoped<IDeviceAssignmentRepository, DeviceAssignmentRepository>();
 
         // Unit of Work
         services.AddScoped<IUnitOfWork, UnitOfWork>();

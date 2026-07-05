@@ -14,17 +14,20 @@ public class UnitOfWork : IUnitOfWork
     public ICustomerRepository Customers { get; }
     public IVehicleRepository Vehicles { get; }
     public IGpsDeviceRepository GpsDevices { get; }
+    public IDeviceAssignmentRepository DeviceAssignments { get; }
 
     public UnitOfWork(
         ShaloTrackDbContext context,
         ICustomerRepository customerRepository,
         IVehicleRepository vehicleRepository,
-        IGpsDeviceRepository gpsDeviceRepository)
+        IGpsDeviceRepository gpsDeviceRepository,
+        IDeviceAssignmentRepository deviceAssignmentRepository)
     {
         _context = context;
         Customers = customerRepository;
         Vehicles = vehicleRepository;
         GpsDevices = gpsDeviceRepository;
+        DeviceAssignments = deviceAssignmentRepository;
     }
 
     public async Task<int> SaveChangesAsync()
