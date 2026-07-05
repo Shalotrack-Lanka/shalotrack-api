@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore.Storage;
 using ShaloTrack_API.Data;
+using ShaloTrack_API.Models;
 using ShaloTrack_API.Repositories.Interfaces;
 
 namespace ShaloTrack_API.Repositories.Implementations;
@@ -12,15 +13,18 @@ public class UnitOfWork : IUnitOfWork
 
     public ICustomerRepository Customers { get; }
     public IVehicleRepository Vehicles { get; }
+    public IGpsDeviceRepository GpsDevices { get; }
 
     public UnitOfWork(
         ShaloTrackDbContext context,
         ICustomerRepository customerRepository,
-        IVehicleRepository vehicleRepository)
+        IVehicleRepository vehicleRepository,
+        IGpsDeviceRepository gpsDeviceRepository)
     {
         _context = context;
         Customers = customerRepository;
         Vehicles = vehicleRepository;
+        GpsDevices = gpsDeviceRepository;
     }
 
     public async Task<int> SaveChangesAsync()

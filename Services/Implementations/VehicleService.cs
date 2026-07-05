@@ -159,6 +159,50 @@ public class VehicleService : IVehicleService
             );
         }
 
+        var existingVehicle = await _unitOfWork.Vehicles.GetByVehicleNumberAsync(dto.VehicleNumber);
+
+        if (existingVehicle is not null &&
+            existingVehicle.VehicleId != vehicleId)
+        {
+            return ApiResponse<VehicleResponseDto>.Fail(
+                (int)HttpStatusCode.Conflict,
+                "Vehicle number already exists.",
+                "Vehicle number must be unique."
+            );
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.ChassisNumber))
+        {
+            var existingChassis = await _unitOfWork.Vehicles
+                .GetByChassisNumberAsync(dto.ChassisNumber);
+
+            if (existingChassis is not null &&
+                existingChassis.VehicleId != vehicleId)
+            {
+                return ApiResponse<VehicleResponseDto>.Fail(
+                    (int)HttpStatusCode.Conflict,
+                    "Chassis number already exists.",
+                    "Chassis number must be unique."
+                );
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.EngineNumber))
+        {
+            var existingEngine = await _unitOfWork.Vehicles
+                .GetByEngineNumberAsync(dto.EngineNumber);
+
+            if (existingEngine is not null &&
+                existingEngine.VehicleId != vehicleId)
+            {
+                return ApiResponse<VehicleResponseDto>.Fail(
+                    (int)HttpStatusCode.Conflict,
+                    "Engine number already exists.",
+                    "Engine number must be unique."
+                );
+            }
+        }
+
         vehicle.VehicleNumber = dto.VehicleNumber;
         vehicle.ChassisNumber = dto.ChassisNumber;
         vehicle.EngineNumber = dto.EngineNumber;
@@ -219,7 +263,7 @@ public class VehicleService : IVehicleService
             Color = vehicle.Color,
             VehicleType = vehicle.VehicleType,
             FuelType = vehicle.FuelType,
-            HasGpsDevice = vehicle.DeviceAssignments.Any()
+            HasGpsDevice = vehicle.DeviceAssignments.Any(a => a.Status == Enums.AssignmentStatus.Active)
         };
     }
 }

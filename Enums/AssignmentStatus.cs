@@ -2,7 +2,7 @@
 
 public enum AssignmentStatus
 {
-    Active,
-    Removed,
-    Inactive
+    Inactive = 0,
+    Active = 1,
+    Removed = 2
 }

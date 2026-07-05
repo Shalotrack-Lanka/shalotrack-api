@@ -10,6 +10,7 @@ public static class BusinessServiceExtensions
     {
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<IVehicleService, VehicleService>();
+        services.AddScoped<IGpsDeviceService,GpsDeviceService>();
 
         return services;
     }
