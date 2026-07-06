@@ -23,7 +23,6 @@
     <Folder Include="Middleware\" />
     <Folder Include="Helpers\" />
     <Folder Include="Migrations\" />
-    <Folder Include="Mappings\" />
   </ItemGroup>
 
 </Project>
