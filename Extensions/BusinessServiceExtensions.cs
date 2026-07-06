@@ -13,6 +13,7 @@ public static class BusinessServiceExtensions
         services.AddScoped<IGpsDeviceService,GpsDeviceService>();
         services.AddScoped<IDeviceAssignmentService, DeviceAssignmentService>();
         services.AddScoped<ICurrentLocationService, CurrentLocationService>();
+        services.AddScoped<IDeviceStatusService, DeviceStatusService>();
 
         return services;
     }
