@@ -4,7 +4,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue)
 ![EF Core](https://img.shields.io/badge/Entity_Framework_Core-8-purple)
 ![Status](https://img.shields.io/badge/Status-Active_Development-green)
-![Version](https://img.shields.io/badge/Version-v0.3.0-orange)
+![Version](https://img.shields.io/badge/Version-v0.4.0-orange)
 
 Central Business & Application Layer of the ShaloTrack GPS Tracking and Fleet Management Platform.
 
@@ -43,13 +43,13 @@ The API acts as the single source of truth for all client applications. Business
 | Vehicle Management | ✅ Complete |
 | GPS Device Management | ✅ Complete |
 | Device Assignment | ✅ Complete |
-| Current Location | 🚧 Next |
-| Device Status | ⏳ Planned |
-| GPS Tracking History | ⏳ Planned |
+| Current Location | ✅ Complete |
+| Device Status | ✅ Complete |
+| GPS Tracking History | 🚧 Next |
 | Device Events | ⏳ Planned |
 | Raw Packet Services | ⏳ Planned |
 
-**Current Version:** `v0.3.0` — Active Development
+**Current Version:** `v0.4.0` — Active Development
 
 ---
 
@@ -88,6 +88,7 @@ The Gateway and API never communicate directly. The Gateway writes device data t
 - REST API
 - Entity Framework Core 8
 - Repository Pattern
+- Query Repository Pattern (projection-based reads)
 - Unit of Work
 - Dependency Injection
 - Swagger / OpenAPI
@@ -136,7 +137,7 @@ ShaloTrack_API/
 │
 ├── Repositories/
 │   ├── Interfaces/               # Repository contracts
-│   └── Implementations/          # EF Core implementations
+│   └── Implementations/          # EF Core implementations (write + read/query repos)
 │
 ├── Responses/
 │   ├── ApiResponse.cs            # Standard response envelope
@@ -190,6 +191,17 @@ HTTP Response
 
 Controllers contain no logic — they receive a request, call a service, and return `StatusCode(response.StatusCode, response)`. All validation, business rules, and entity mapping are in the service layer.
 
+### Read vs. Write Separation
+
+As of v0.4.0, telemetry modules follow a dedicated read pipeline distinct from business modules:
+
+```
+Business Modules:    Repository → Unit of Work → Service
+Telemetry Modules:   Repository → Projection (Expression<Func<TEntity, DTO>>) → Service
+```
+
+Telemetry repositories are read-only, use `AsNoTracking()`, and project directly to DTOs — avoiding full entity materialization for high-frequency location and status queries.
+
 ---
 
 ## Implemented Modules
@@ -240,6 +252,26 @@ Controllers contain no logic — they receive a request, call a service, and ret
 
 ---
 
+### Current Location ✅
+
+- Live vehicle location retrieval
+- Lookup by vehicle
+- Lookup by device
+- Projection-based, read-only queries for low-latency responses
+
+---
+
+### Device Status ✅
+
+- Online / offline status
+- Battery level
+- GPS signal strength
+- Ignition status
+- Movement status
+- Power status
+
+---
+
 ## Current Endpoints
 
 ### Authentication
@@ -284,6 +316,20 @@ PATCH  /api/assignments/{id}/unassign      ← unassign device
 GET    /api/assignments/vehicle/{id}       ← history for a specific vehicle
 ```
 
+### Current Location
+```
+GET    /api/currentlocations
+GET    /api/currentlocations/vehicle/{vehicleId}
+GET    /api/currentlocations/device/{deviceId}
+```
+
+### Device Status
+```
+GET    /api/devicestatus
+GET    /api/devicestatus/device/{deviceId}
+GET    /api/devicestatus/vehicle/{vehicleId}
+```
+
 All responses use the `ApiResponse<T>` envelope:
 
 ```json
@@ -315,6 +361,7 @@ Current rules:
 - Duplicate engine number prevention
 - Email uniqueness enforced per customer
 - NIC uniqueness enforced per customer
+- Telemetry endpoints are read-only and never mutate device or vehicle data
 
 ---
 
@@ -338,19 +385,25 @@ Current rules:
 - Transaction support for multi-step operations
 - Active assignment validation (one device per vehicle constraint)
 
+### v0.4.0 — Telemetry Foundation
+- Current Location API (live vehicle/device location lookup)
+- Device Status API (online status, battery, signal, ignition, movement, power)
+- Query Repository Pattern introduced for telemetry modules
+- Expression-based projection mapping (`Expression<Func<TEntity, DTO>>`)
+- Read/write architectural separation between business and telemetry modules
+- Performance improvements: `AsNoTracking()`, projection queries, reduced entity materialization
+
 ---
 
 ## Roadmap
 
-### v0.4.0 — Tracking Services
-- Current Location API
-- Device Status API
+### v0.5.0 — Tracking & Events
 - GPS Tracking History
 - Device Events
 - Raw Packets (Admin)
-
-### v0.5.0 — Platform Hardening
 - Filtering and pagination
+
+### v0.6.0 — Platform Hardening
 - Centralized logging
 - Global exception handling middleware
 - Rate limiting
