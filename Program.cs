@@ -18,7 +18,8 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerDocumentation();
 }
 
-app.UseHttpsRedirection();
+// Temporarily disable until ALB is fully configured
+//app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
