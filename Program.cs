@@ -13,7 +13,7 @@ builder.Services.AddSwaggerDocumentation();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
     app.UseSwaggerDocumentation();
 }
@@ -21,6 +21,13 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseAuthorization();
+
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "Healthy",
+    timestamp = DateTime.UtcNow
+}));
+
 
 app.MapControllers();
 
