@@ -19,7 +19,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 }
 
 // Temporarily disable until ALB is fully configured
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
