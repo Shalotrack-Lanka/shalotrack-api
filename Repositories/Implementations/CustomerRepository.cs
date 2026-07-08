@@ -1,6 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using ShaloTrack_API.DTOs.Dashboard;
 using ShaloTrack_API.Data;
+using ShaloTrack_API.DTOs.Dashboard;
 using ShaloTrack_API.Models;
 using ShaloTrack_API.Repositories.Interfaces;
 
@@ -72,15 +72,41 @@ public class CustomerRepository : ICustomerRepository
         if (customer == null)
             return null;
 
-        // Temporary implementation
+        var vehicles = await _context.Vehicles
+            .AsNoTracking()
+            .Where(v => v.CustomerId == customerId)
+            .OrderBy(v => v.VehicleNumber)
+            .ToListAsync();
+
+        var dashboardVehicles = vehicles
+            .Select(v => new DashboardVehicleDto
+            {
+                VehicleId = v.VehicleId,
+                VehicleNumber = v.VehicleNumber,
+                Make = v.Make,
+                Model = v.Model,
+
+                DeviceId = null,
+                Latitude = null,
+                Longitude = null,
+                Speed = 0,
+                Heading = 0,
+                Ignition = false,
+                Online = false,
+                LastUpdate = null
+            })
+            .ToList();
+
         return new DashboardResponseDto
         {
             CustomerId = customer.CustomerId,
             CustomerName = customer.FullName,
-            VehicleCount = 0,
+
+            VehicleCount = dashboardVehicles.Count,
             OnlineVehicles = 0,
-            OfflineVehicles = 0,
-            Vehicles = new List<DashboardVehicleDto>()
+            OfflineVehicles = dashboardVehicles.Count,
+
+            Vehicles = dashboardVehicles
         };
     }
 }
