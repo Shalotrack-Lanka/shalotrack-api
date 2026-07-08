@@ -65,48 +65,36 @@ public class CustomerRepository : ICustomerRepository
 
     public async Task<DashboardResponseDto?> GetDashboardAsync(Guid customerId)
     {
-        var customer = await _context.Customers
+        // SRE Optimization: Combine both table lookups into a single SQL statement execution
+        return await _context.Customers
             .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.CustomerId == customerId);
-
-        if (customer == null)
-            return null;
-
-        var vehicles = await _context.Vehicles
-            .AsNoTracking()
-            .Where(v => v.CustomerId == customerId)
-            .OrderBy(v => v.VehicleNumber)
-            .ToListAsync();
-
-        var dashboardVehicles = vehicles
-            .Select(v => new DashboardVehicleDto
+            .Where(c => c.CustomerId == customerId)
+            .Select(c => new DashboardResponseDto
             {
-                VehicleId = v.VehicleId,
-                VehicleNumber = v.VehicleNumber,
-                Make = v.Make,
-                Model = v.Model,
-
-                DeviceId = null,
-                Latitude = null,
-                Longitude = null,
-                Speed = 0,
-                Heading = 0,
-                Ignition = false,
-                Online = false,
-                LastUpdate = null
+                CustomerId = c.CustomerId,
+                CustomerName = c.FullName,
+                VehicleCount = c.Vehicles.Count,
+                OnlineVehicles = 0,
+                OfflineVehicles = c.Vehicles.Count,
+                Vehicles = c.Vehicles
+                    .OrderBy(v => v.VehicleNumber)
+                    .Select(v => new DashboardVehicleDto
+                    {
+                        VehicleId = v.VehicleId,
+                        VehicleNumber = v.VehicleNumber,
+                        Make = v.Make,
+                        Model = v.Model,
+                        DeviceId = null,
+                        Latitude = null,
+                        Longitude = null,
+                        Speed = 0,
+                        Heading = 0,
+                        Ignition = false,
+                        Online = false,
+                        LastUpdate = null
+                    })
+                    .ToList()
             })
-            .ToList();
-
-        return new DashboardResponseDto
-        {
-            CustomerId = customer.CustomerId,
-            CustomerName = customer.FullName,
-
-            VehicleCount = dashboardVehicles.Count,
-            OnlineVehicles = 0,
-            OfflineVehicles = dashboardVehicles.Count,
-
-            Vehicles = dashboardVehicles
-        };
+            .FirstOrDefaultAsync();
     }
 }
