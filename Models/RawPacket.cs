@@ -12,5 +12,8 @@ namespace ShaloTrack_API.Models
         public DateTime ReceivedAt { get; set; }
         public bool Parsed { get; set; }
         public GpsDevice Device { get; set; } = null!;
+
+        public ICollection<DeviceEvent> DeviceEvents { get; set; }
+            = new List<DeviceEvent>();
     }
 }

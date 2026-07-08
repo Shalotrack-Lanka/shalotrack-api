@@ -25,10 +25,13 @@ public class GpsDevice
         = new List<DeviceAssignment>();
 
     public ICollection<RawPacket> RawPackets { get; set; }
-    = new List<RawPacket>();
+        = new List<RawPacket>();
 
     public ICollection<GpsTracking> GpsTrackings { get; set; }
         = new List<GpsTracking>();
+
+    public ICollection<DeviceEvent> DeviceEvents { get; set; }
+        = new List<DeviceEvent>();
 
     public CurrentLocation? CurrentLocation { get; set; }
 

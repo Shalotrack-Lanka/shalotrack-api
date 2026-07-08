@@ -21,6 +21,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<RawPacket> RawPackets => Set<RawPacket>();
     public DbSet<GpsTracking> GpsTrackings => Set<GpsTracking>();
     public DbSet<CurrentLocation> CurrentLocations => Set<CurrentLocation>();
+    public DbSet<DeviceEvent> DeviceEvents => Set<DeviceEvent>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -64,5 +65,20 @@ public class ShaloTrackDbContext : DbContext
             .HasOne(d => d.Device)
             .WithOne()
             .HasForeignKey<DeviceStatus>(d => d.DeviceId);
+
+        modelBuilder.Entity<DeviceEvent>()
+            .HasOne(e => e.Device)
+            .WithMany(d => d.DeviceEvents)
+            .HasForeignKey(e => e.DeviceId);    
+
+        modelBuilder.Entity<DeviceEvent>()
+            .HasOne(e => e.Vehicle)
+            .WithMany(v => v.DeviceEvents)
+            .HasForeignKey(e => e.VehicleId);
+
+        modelBuilder.Entity<DeviceEvent>()
+            .HasOne(e => e.RawPacket)
+            .WithMany(r => r.DeviceEvents)
+            .HasForeignKey(e => e.RawPacketId);
     }
 }

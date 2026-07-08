@@ -21,6 +21,10 @@ public class Vehicle
     public DateTime UpdatedAt { get; set; }
     public Customer Customer { get; set; } = null!;
     public CurrentLocation? CurrentLocation { get; set; }
+
     public ICollection<DeviceAssignment> DeviceAssignments { get; set; }
         = new List<DeviceAssignment>();
+
+    public ICollection<DeviceEvent> DeviceEvents { get; set; }
+        = new List<DeviceEvent>();
 }

@@ -15,6 +15,7 @@ public static class BusinessServiceExtensions
         services.AddScoped<ICurrentLocationService, CurrentLocationService>();
         services.AddScoped<IDeviceStatusService, DeviceStatusService>();
         services.AddScoped<IGpsTrackingService, GpsTrackingService>();
+        services.AddScoped<IDeviceEventService, DeviceEventService>();
 
         return services;
     }
