@@ -1,10 +1,12 @@
-﻿using System.Net;
-using ShaloTrack_API.DTOs.Customer;
+﻿using ShaloTrack_API.DTOs.Customer;
+using ShaloTrack_API.DTOs.Dashboard;
 using ShaloTrack_API.Enums;
 using ShaloTrack_API.Models;
+using ShaloTrack_API.Repositories.Implementations;
 using ShaloTrack_API.Repositories.Interfaces;
 using ShaloTrack_API.Responses;
 using ShaloTrack_API.Services.Interfaces;
+using System.Net;
 
 namespace ShaloTrack_API.Services.Implementations;
 
@@ -181,5 +183,23 @@ public class CustomerService : ICustomerService
             AccountStatus = customer.AccountStatus,
             VehicleCount = customer.Vehicles.Count
         };
+    }
+
+    public async Task<ApiResponse<DashboardResponseDto>> GetDashboardAsync(
+    Guid customerId)
+    {
+        var dashboard = await _unitOfWork.Customers
+            .GetDashboardAsync(customerId);
+
+        if (dashboard == null)
+        {
+            return ApiResponse<DashboardResponseDto>.Fail(
+                404,
+                "Customer not found.");
+        }
+
+        return ApiResponse<DashboardResponseDto>.Ok(
+            dashboard,
+            "Dashboard retrieved successfully.");
     }
 }

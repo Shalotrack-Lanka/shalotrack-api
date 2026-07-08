@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using ShaloTrack_API.DTOs.Dashboard;
 using ShaloTrack_API.Data;
 using ShaloTrack_API.Models;
 using ShaloTrack_API.Repositories.Interfaces;
@@ -60,5 +61,98 @@ public class CustomerRepository : ICustomerRepository
     public void Delete(Customer customer)
     {
         _context.Customers.Remove(customer);
+    }
+
+    public async Task<DashboardResponseDto?> GetDashboardAsync(
+    Guid customerId)
+    {
+        var customer = await _context.Customers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c =>
+                c.CustomerId == customerId);
+
+        if (customer == null)
+            return null;
+
+        var vehicles = await
+            (from vehicle in _context.Vehicles
+
+             where vehicle.CustomerId == customerId
+
+             join assignment in _context.DeviceAssignments
+                 on vehicle.VehicleId equals assignment.VehicleId
+                 into assignments
+
+             from assignment in assignments.DefaultIfEmpty()
+
+             join location in _context.CurrentLocations
+                 on vehicle.VehicleId equals location.VehicleId
+                 into locations
+
+             from location in locations.DefaultIfEmpty()
+
+             join status in _context.DeviceStatuses
+                 on assignment.DeviceId equals status.DeviceId
+                 into statuses
+
+             from status in statuses.DefaultIfEmpty()
+
+             select new DashboardVehicleDto
+             {
+                 VehicleId = vehicle.VehicleId,
+
+                 VehicleNumber = vehicle.VehicleNumber,
+
+                 Make = vehicle.Make,
+
+                 Model = vehicle.Model,
+
+                 DeviceId = assignment != null
+                     ? assignment.DeviceId
+                     : null,
+
+                 Latitude = location != null
+                     ? location.Latitude
+                     : null,
+
+                 Longitude = location != null
+                     ? location.Longitude
+                     : null,
+
+                 Speed = location != null
+                     ? location.Speed
+                     : 0,
+
+                 Heading = location != null
+                     ? location.Heading
+                     : 0,
+
+                 Ignition = location != null &&
+                             location.IgnitionStatus,
+
+                 LastUpdate = location != null
+                     ? location.LastUpdate
+                     : null,
+
+                 Online = status != null &&
+                          status.IsOnline
+             })
+            .OrderBy(v => v.VehicleNumber)
+            .ToListAsync();
+
+        return new DashboardResponseDto
+        {
+            CustomerId = customer.CustomerId,
+
+            CustomerName = customer.FullName,
+
+            VehicleCount = vehicles.Count,
+
+            OnlineVehicles = vehicles.Count(v => v.Online),
+
+            OfflineVehicles = vehicles.Count(v => !v.Online),
+
+            Vehicles = vehicles
+        };
     }
 }

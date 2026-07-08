@@ -1,4 +1,5 @@
 ﻿using ShaloTrack_API.DTOs.Customer;
+using ShaloTrack_API.DTOs.Dashboard;
 using ShaloTrack_API.Responses;
 
 namespace ShaloTrack_API.Services.Interfaces;
@@ -16,4 +17,6 @@ public interface ICustomerService
         UpdateCustomerDto dto);
 
     Task<ApiResponse<string>> DeactivateAsync(Guid customerId);
+
+    Task<ApiResponse<DashboardResponseDto>> GetDashboardAsync(Guid customerId);
 }

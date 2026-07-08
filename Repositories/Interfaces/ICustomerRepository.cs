@@ -1,9 +1,11 @@
 ﻿using ShaloTrack_API.Models;
+using ShaloTrack_API.DTOs.Dashboard;
 
 namespace ShaloTrack_API.Repositories.Interfaces;
 
 public interface ICustomerRepository
 {
+    Task<DashboardResponseDto?> GetDashboardAsync(Guid customerId);
     Task<List<Customer>> GetAllAsync();
 
     Task<Customer?> GetByIdAsync(Guid customerId);

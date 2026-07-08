@@ -80,4 +80,19 @@ public class CustomersController : ControllerBase
 
         return StatusCode(response.StatusCode, response);
     }
+
+    /// <summary>
+    /// Retrieve customer dashboard.
+    /// </summary>
+    [HttpGet("{customerId:guid}/dashboard")]
+    public async Task<IActionResult> GetDashboard(
+        Guid customerId)
+    {
+        var response =
+            await _customerService.GetDashboardAsync(customerId);
+
+        return StatusCode(
+            response.StatusCode,
+            response);
+    }
 }
