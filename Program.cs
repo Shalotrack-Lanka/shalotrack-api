@@ -30,7 +30,8 @@ app.UseExceptionHandler(exceptionHandlerApp =>
         {
             statusCode = (int)HttpStatusCode.InternalServerError,
             message = "An unhandled error occurred inside the ShaloTrack API server.",
-            detailed = exception?.Message // Shows the exact error message (like database timeout) in Swagger
+            // Updated to grab the inner exception so you can see the REAL database error
+            detailed = (string?)(exception?.InnerException?.Message ?? exception?.Message)
         };
 
         // If it's a known timeout or database stream issue, clarify it
@@ -41,7 +42,8 @@ app.UseExceptionHandler(exceptionHandlerApp =>
             {
                 statusCode = (int)HttpStatusCode.GatewayTimeout,
                 message = "Database connection pool timeout error.",
-                detailed = "The database pooler took too long to return data. Check Supabase query locks."
+                // Added (string?) cast right here to fix your compiler error
+                detailed = (string?)"The database pooler took too long to return data. Check Supabase query locks."
             };
         }
         else
