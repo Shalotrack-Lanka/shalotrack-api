@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Diagnostics;
 using ShaloTrack_API.Extensions;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,6 +14,44 @@ builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();
 
 var app = builder.Build();
+
+// Global Exception Handler for Production & Development Environments
+app.UseExceptionHandler(exceptionHandlerApp =>
+{
+    exceptionHandlerApp.Run(async context =>
+    {
+        context.Response.ContentType = "application/json";
+
+        var exceptionFeature = context.Features.Get<IExceptionHandlerPathFeature>();
+        var exception = exceptionFeature?.Error;
+
+        // Custom SRE Error Response format
+        var errorResponse = new
+        {
+            statusCode = (int)HttpStatusCode.InternalServerError,
+            message = "An unhandled error occurred inside the ShaloTrack API server.",
+            detailed = exception?.Message // Shows the exact error message (like database timeout) in Swagger
+        };
+
+        // If it's a known timeout or database stream issue, clarify it
+        if (exception?.Message.Contains("Timeout") == true || exception?.InnerException?.Message.Contains("Timeout") == true)
+        {
+            context.Response.StatusCode = (int)HttpStatusCode.GatewayTimeout;
+            errorResponse = new
+            {
+                statusCode = (int)HttpStatusCode.GatewayTimeout,
+                message = "Database connection pool timeout error.",
+                detailed = "The database pooler took too long to return data. Check Supabase query locks."
+            };
+        }
+        else
+        {
+            context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+        }
+
+        await context.Response.WriteAsJsonAsync(errorResponse);
+    });
+});
 
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
@@ -28,7 +68,6 @@ app.MapGet("/health", () => Results.Ok(new
     status = "Healthy",
     timestamp = DateTime.UtcNow
 }));
-
 
 app.MapControllers();
 
