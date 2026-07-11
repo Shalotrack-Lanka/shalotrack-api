@@ -29,6 +29,7 @@ The API acts as the single source of truth for all client applications. Business
 - [Release History](#release-history)
 - [Roadmap](#roadmap)
 - [Getting Started](#getting-started)
+- [Testing the API with Swagger (No Coding Needed)](#testing-the-api-with-swagger-no-coding-needed)
 - [Contributors](#contributors)
 
 ---
@@ -454,6 +455,93 @@ dotnet run
 ```
 
 Swagger UI: `https://localhost:<port>/swagger`
+
+---
+
+## Testing the API with Swagger (No Coding Needed)
+
+The live API also has a public Swagger page for anyone to try out — no local setup required:
+
+```
+https://api.shalotrack.com/swagger/index.html
+```
+
+The API is protected by Firebase Authentication, so before you can test any endpoint, you need to unlock the page with a temporary access key (called a **token**). This section explains how, in plain terms, for anyone — technical or not.
+
+> **Why do I need to do this?**
+> The API is protected, like a locked door. To open it, you need a special "key" (token). This guide shows you how to get that key and use it.
+
+### What you'll need
+
+- A Windows computer
+- Internet connection
+- 5 minutes
+
+### Step 1: Get your key (token)
+
+1. Click the **Windows Start icon** (bottom-left of your screen).
+2. Type **CMD** and press **Enter**. A black window will open — this is called Command Prompt.
+3. Copy the text below, paste it into that black window, and press **Enter**:
+
+```bash
+curl -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyBbFQSKpl8B4ld47LH4-BaGGWKa55ha9kk" -H "Content-Type: application/json" -d "{\"email\":\"swaggertest@test.com\",\"password\":\"Test1234!\",\"returnSecureToken\":true}"
+```
+
+> **Tip:** To paste into Command Prompt, right-click inside the window (Ctrl+V doesn't always work there).
+
+4. After pressing Enter, you'll see a bunch of text appear. Somewhere in there is a line that looks like this:
+
+```json
+"idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6...(long text)...",
+```
+
+5. Copy **only the long text between the quotes** after `idToken`. This is your key. Don't include the quotation marks.
+
+### Step 2: Go to the API testing page
+
+Open your web browser and go to:
+
+```
+https://api.shalotrack.com/swagger/index.html
+```
+
+This page lists everything the API can do.
+
+### Step 3: Unlock the page with your key
+
+1. Near the top-right of the page, click the green **Authorize** button (it has a padlock icon).
+2. A small box will pop up asking for a value. **Paste your key here** (the long text you copied in Step 1).
+
+   > Just paste the key by itself — you don't need to type "Bearer" or anything else in front of it.
+
+3. Click **Authorize**, then click **Close**.
+
+The padlock icons on the page should now look "locked" and ready — this means you're successfully signed in.
+
+### Step 4: Try out the API
+
+1. Click on any section (like **Customers**) to expand it.
+2. Click on any request (like `GET /api/Customers`).
+3. Click the **Try it out** button.
+4. Fill in any details it asks for (if any).
+5. Click **Execute**.
+6. Scroll down to see the result under **Server response**.
+
+That's it — you're now testing the live API.
+
+### Something not working?
+
+**Getting an error that says "token expired"?**
+Your key only works for **1 hour** after you created it. Just repeat **Step 1** to get a new key, and repeat **Step 3** to use it.
+
+**Still stuck?**
+Double-check that:
+- You copied the *entire* key (it's very long, and it's easy to miss part of it)
+- You didn't accidentally copy the quotation marks along with the key
+
+### A quick note on safety
+
+Your key acts like a temporary password. Don't share it with anyone or post it publicly (like in a chat, forum, or GitHub issue) — even though it stops working after an hour, it's good habit to keep it private.
 
 ---
 
