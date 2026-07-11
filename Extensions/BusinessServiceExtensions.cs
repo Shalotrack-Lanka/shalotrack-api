@@ -1,4 +1,5 @@
-﻿using ShaloTrack_API.Services.Implementations;
+﻿using ShaloTrack_API.Auth;
+using ShaloTrack_API.Services.Implementations;
 using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Extensions;
@@ -16,6 +17,7 @@ public static class BusinessServiceExtensions
         services.AddScoped<IDeviceStatusService, DeviceStatusService>();
         services.AddScoped<IGpsTrackingService, GpsTrackingService>();
         services.AddScoped<IDeviceEventService, DeviceEventService>();
+        services.AddScoped<ICurrentUser, CurrentUser>();
 
         return services;
     }
