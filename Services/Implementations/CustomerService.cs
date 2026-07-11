@@ -23,6 +23,31 @@ public class CustomerService : ICustomerService
         _currentUser = currentUser;
     }
 
+    public async Task<ApiResponse<CustomerResponseDto>> GetMyProfileAsync()
+    {
+        var uid = _currentUser.FirebaseUid;
+        if (string.IsNullOrEmpty(uid))
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.Unauthorized,
+                "Authentication required.",
+                "No valid session found."
+            );
+        }
+
+        var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(uid);
+        if (customer is null)
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound,
+                "Profile not found.",
+                "No customer profile exists for this account yet."
+            );
+        }
+
+        return ApiResponse<CustomerResponseDto>.Ok(ToDto(customer), "Profile retrieved successfully.");
+    }
+
     public async Task<ApiResponse<IReadOnlyList<CustomerResponseDto>>> GetAllAsync()
     {
         // Retrieve entities

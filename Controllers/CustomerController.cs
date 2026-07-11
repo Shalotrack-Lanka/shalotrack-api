@@ -19,6 +19,19 @@ public class CustomersController : ControllerBase
     }
 
     /// <summary>
+    /// Retrieve the logged-in caller's own customer profile.
+    /// No customerId in the route — resolved from the token, so any authenticated
+    /// customer (not just staff) can safely call this.
+    /// </summary>
+    [HttpGet("me")]
+    public async Task<IActionResult> GetMyProfile()
+    {
+        var response = await _customerService.GetMyProfileAsync();
+
+        return StatusCode(response.StatusCode, response);
+    }
+
+    /// <summary>
     /// Retrieve all customers. Staff only.
     /// </summary>
     [HttpGet]

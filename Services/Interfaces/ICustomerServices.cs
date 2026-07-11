@@ -6,6 +6,8 @@ namespace ShaloTrack_API.Services.Interfaces;
 
 public interface ICustomerService
 {
+    Task<ApiResponse<CustomerResponseDto>> GetMyProfileAsync();
+
     Task<ApiResponse<IReadOnlyList<CustomerResponseDto>>> GetAllAsync();
 
     Task<ApiResponse<CustomerResponseDto>> GetByIdAsync(Guid customerId);
