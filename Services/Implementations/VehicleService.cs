@@ -4,16 +4,19 @@ using ShaloTrack_API.Models;
 using ShaloTrack_API.Repositories.Interfaces;
 using ShaloTrack_API.Responses;
 using ShaloTrack_API.Services.Interfaces;
+using ShaloTrack_API.Auth;
 
 namespace ShaloTrack_API.Services.Implementations;
 
 public class VehicleService : IVehicleService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUser _currentUser;
 
-    public VehicleService(IUnitOfWork unitOfWork)
+    public VehicleService(IUnitOfWork unitOfWork, ICurrentUser currentUser)
     {
         _unitOfWork = unitOfWork;
+        _currentUser = currentUser;
     }
 
     public async Task<ApiResponse<IReadOnlyList<VehicleResponseDto>>> GetAllAsync()
@@ -43,6 +46,16 @@ public class VehicleService : IVehicleService
             );
         }
 
+        //vehicle.customer is already included
+
+        if (!_currentUser.IsStaff &&
+        !string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
+        {
+            return ApiResponse<VehicleResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound, "Vehicle not found.",
+                $"No vehicle exists with ID '{vehicleId}'.");
+        }
+
         return ApiResponse<VehicleResponseDto>.Ok(
             ToDto(vehicle),
             "Vehicle retrieved successfully."
@@ -51,13 +64,16 @@ public class VehicleService : IVehicleService
 
     public async Task<ApiResponse<IReadOnlyList<VehicleResponseDto>>> GetByCustomerAsync(Guid customerId)
     {
-        if (!await _unitOfWork.Customers.ExistsAsync(customerId))
+        var customer = await _unitOfWork.Customers.GetByIdAsync(customerId);
+
+        if (customer is null ||
+            (!_currentUser.IsStaff &&
+             !string.Equals(customer.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal)))
         {
             return ApiResponse<IReadOnlyList<VehicleResponseDto>>.Fail(
-                (int)HttpStatusCode.NotFound,
+                (int)HttpStatusCode.NotFound, 
                 "Customer not found.",
-                "The specified customer does not exist."
-            );
+                "The specified customer does not exist.");
         }
 
         var vehicles = await _unitOfWork.Vehicles.GetByCustomerAsync(customerId);

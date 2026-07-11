@@ -15,6 +15,12 @@ public class CustomerRepository : ICustomerRepository
         _context = context;
     }
 
+    public async Task<Customer?> GetByFirebaseUidAsync(string firebaseUid)
+    {
+        return await _context.Customers
+            .FirstOrDefaultAsync(c => c.FirebaseUid == firebaseUid);
+    }
+
     public async Task<List<Customer>> GetAllAsync()
     {
         return await _context.Customers

@@ -13,5 +13,6 @@ public interface ICustomerRepository
     Task AddAsync(Customer customer);
     void Update(Customer customer);
     void Delete(Customer customer);
+    Task<Customer?> GetByFirebaseUidAsync(string firebaseUid);
     Task<DashboardResponseDto?> GetDashboardAsync(Guid customerId);
 }

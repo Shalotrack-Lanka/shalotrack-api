@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using ShaloTrack_API.DTOs.DeviceAssignment;
 using ShaloTrack_API.Services.Interfaces;
 
@@ -6,6 +7,7 @@ namespace ShaloTrack_API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class DeviceAssignmentsController : ControllerBase
 {
     private readonly IDeviceAssignmentService _deviceAssignmentService;
@@ -17,9 +19,10 @@ public class DeviceAssignmentsController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieve all device assignments.
+    /// Retrieve all device assignments. Staff only.
     /// </summary>
     [HttpGet]
+    [Authorize(Roles = "Admin,Dealer")]
     public async Task<IActionResult> GetAll()
     {
         var response = await _deviceAssignmentService.GetAllAsync();

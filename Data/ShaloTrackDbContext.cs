@@ -28,6 +28,10 @@ public class ShaloTrackDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<Customer>()
+            .HasIndex(c => c.FirebaseUid)
+            .IsUnique();
+
         modelBuilder.Entity<CurrentLocation>()
             .HasKey(c => c.DeviceId);
 

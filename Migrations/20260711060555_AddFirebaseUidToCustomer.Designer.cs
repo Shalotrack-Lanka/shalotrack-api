@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using ShaloTrack_API.Data;
@@ -11,9 +12,11 @@ using ShaloTrack_API.Data;
 namespace ShaloTrack_API.Migrations
 {
     [DbContext(typeof(ShaloTrackDbContext))]
-    partial class ShaloTrackDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260711060555_AddFirebaseUidToCustomer")]
+    partial class AddFirebaseUidToCustomer
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

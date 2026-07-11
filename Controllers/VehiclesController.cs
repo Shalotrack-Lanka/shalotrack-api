@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.Vehicle;
 using ShaloTrack_API.Services.Interfaces;
 
@@ -6,6 +8,7 @@ namespace ShaloTrack_API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class VehiclesController : ControllerBase
 {
     private readonly IVehicleService _vehicleService;
@@ -17,9 +20,10 @@ public class VehiclesController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieve all vehicles.
+    /// Retrieve all vehicles. Staff only.
     /// </summary>
     [HttpGet]
+    [Authorize(Roles = "Admin,Dealer")]
     public async Task<IActionResult> GetAll()
     {
         var response = await _vehicleService.GetAllAsync();
@@ -28,7 +32,8 @@ public class VehiclesController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieve a vehicle by ID.
+    /// Retrieve a vehicle by ID. Ownership is enforced in the service
+    /// (owner is resolved from the loaded vehicle's customer).
     /// </summary>
     [HttpGet("{vehicleId:guid}")]
     public async Task<IActionResult> GetById(Guid vehicleId)
@@ -39,9 +44,10 @@ public class VehiclesController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieve all vehicles belonging to a customer.
+    /// Retrieve all vehicles belonging to a customer. Caller must own the customer.
     /// </summary>
     [HttpGet("customer/{customerId:guid}")]
+    [OwnsCustomer]
     public async Task<IActionResult> GetByCustomer(Guid customerId)
     {
         var response = await _vehicleService.GetByCustomerAsync(customerId);
@@ -50,7 +56,7 @@ public class VehiclesController : ControllerBase
     }
 
     /// <summary>
-    /// Create a new vehicle.
+    /// Create a new vehicle. Ownership of dto.CustomerId is enforced in the service.
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create(

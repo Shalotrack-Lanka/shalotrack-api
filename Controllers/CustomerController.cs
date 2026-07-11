@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.Customer;
 using ShaloTrack_API.Services.Interfaces;
 
@@ -6,6 +8,7 @@ namespace ShaloTrack_API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]                                   // every action requires a valid token
 public class CustomersController : ControllerBase
 {
     private readonly ICustomerService _customerService;
@@ -16,9 +19,10 @@ public class CustomersController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieve all customers.
+    /// Retrieve all customers. Staff only.
     /// </summary>
     [HttpGet]
+    [Authorize(Roles = "Admin,Dealer")]
     public async Task<IActionResult> GetAll()
     {
         var response = await _customerService.GetAllAsync();
@@ -27,9 +31,10 @@ public class CustomersController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieve a customer by ID.
+    /// Retrieve a customer by ID. Caller must own the record.
     /// </summary>
     [HttpGet("{customerId:guid}")]
+    [OwnsCustomer]
     public async Task<IActionResult> GetById(Guid customerId)
     {
         var response = await _customerService.GetByIdAsync(customerId);
@@ -38,7 +43,8 @@ public class CustomersController : ControllerBase
     }
 
     /// <summary>
-    /// Create a new customer.
+    /// Create a new customer. The token proves the verified Firebase account;
+    /// the service binds the new record to that uid.
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create(
@@ -53,9 +59,10 @@ public class CustomersController : ControllerBase
     }
 
     /// <summary>
-    /// Update an existing customer.
+    /// Update an existing customer. Caller must own the record.
     /// </summary>
     [HttpPut("{customerId:guid}")]
+    [OwnsCustomer]
     public async Task<IActionResult> Update(
         Guid customerId,
         [FromBody] UpdateCustomerDto dto)
@@ -71,9 +78,10 @@ public class CustomersController : ControllerBase
     }
 
     /// <summary>
-    /// Deactivate a customer.
+    /// Deactivate a customer. Caller must own the record.
     /// </summary>
     [HttpDelete("{customerId:guid}")]
+    [OwnsCustomer]
     public async Task<IActionResult> Deactivate(Guid customerId)
     {
         var response = await _customerService.DeactivateAsync(customerId);
@@ -82,9 +90,10 @@ public class CustomersController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieve customer dashboard.
+    /// Retrieve customer dashboard. Caller must own the record.
     /// </summary>
     [HttpGet("{customerId:guid}/dashboard")]
+    [OwnsCustomer]
     public async Task<IActionResult> GetDashboard(
         Guid customerId)
     {

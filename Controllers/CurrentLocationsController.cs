@@ -1,10 +1,12 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]   // service enforces per-vehicle ownership + staff-only GetAll
 public class CurrentLocationsController : ControllerBase
 {
     private readonly ICurrentLocationService _currentLocationService;
@@ -16,7 +18,7 @@ public class CurrentLocationsController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieves the latest location of all tracked vehicles.
+    /// Retrieves the latest location of all tracked vehicles. Staff only (enforced in service).
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetAll()
@@ -27,7 +29,7 @@ public class CurrentLocationsController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieves the latest location for a specific vehicle.
+    /// Retrieves the latest location for a specific vehicle. Ownership enforced in service.
     /// </summary>
     [HttpGet("vehicle/{vehicleId:guid}")]
     public async Task<IActionResult> GetByVehicle(Guid vehicleId)
@@ -38,7 +40,7 @@ public class CurrentLocationsController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieves the latest location for a specific GPS device.
+    /// Retrieves the latest location for a specific GPS device. Ownership enforced in service.
     /// </summary>
     [HttpGet("device/{deviceId:guid}")]
     public async Task<IActionResult> GetByDevice(Guid deviceId)

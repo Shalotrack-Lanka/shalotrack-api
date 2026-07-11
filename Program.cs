@@ -1,4 +1,9 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.IdentityModel.Tokens;
+using ShaloTrack_API.Auth;
 using ShaloTrack_API.Extensions;
 using System.Net;
 
@@ -13,9 +18,43 @@ builder.Services.AddBusinessServices();
 builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();
 
+// ---- AUTH (was entirely missing) ----
+var firebaseProjectId = builder.Configuration["Firebase:ProjectId"]
+    ?? throw new InvalidOperationException("Firebase:ProjectId is not configured.");
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = $"https://securetoken.google.com/{firebaseProjectId}";
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = $"https://securetoken.google.com/{firebaseProjectId}",
+            ValidateAudience = true,
+            ValidAudience = firebaseProjectId,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(2)
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, CurrentUser>();
+
 var app = builder.Build();
 
-// Global Exception Handler for Production & Development Environments
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
+
 app.UseExceptionHandler(exceptionHandlerApp =>
 {
     exceptionHandlerApp.Run(async context =>
@@ -25,33 +64,33 @@ app.UseExceptionHandler(exceptionHandlerApp =>
         var exceptionFeature = context.Features.Get<IExceptionHandlerPathFeature>();
         var exception = exceptionFeature?.Error;
 
-        // Custom SRE Error Response format
-        var errorResponse = new
-        {
-            statusCode = (int)HttpStatusCode.InternalServerError,
-            message = "An unhandled error occurred inside the ShaloTrack API server.",
-            // Updated to grab the inner exception so you can see the REAL database error
-            detailed = (string?)(exception?.InnerException?.Message ?? exception?.Message)
-        };
+        var isTimeout = exception?.Message.Contains("Timeout") == true
+                        || exception?.InnerException?.Message.Contains("Timeout") == true;
 
-        // If it's a known timeout or database stream issue, clarify it
-        if (exception?.Message.Contains("Timeout") == true || exception?.InnerException?.Message.Contains("Timeout") == true)
+        // FIX: only expose internal error text in Development.
+        string? detailed = app.Environment.IsDevelopment()
+            ? (exception?.InnerException?.Message ?? exception?.Message)
+            : null;
+
+        if (isTimeout)
         {
             context.Response.StatusCode = (int)HttpStatusCode.GatewayTimeout;
-            errorResponse = new
+            await context.Response.WriteAsJsonAsync(new
             {
                 statusCode = (int)HttpStatusCode.GatewayTimeout,
-                message = "Database connection pool timeout error.",
-                // Added (string?) cast right here to fix your compiler error
-                detailed = (string?)"The database pooler took too long to return data. Check Supabase query locks."
-            };
-        }
-        else
-        {
-            context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                message = "Upstream database timeout. Please retry shortly.",
+                detailed
+            });
+            return;
         }
 
-        await context.Response.WriteAsJsonAsync(errorResponse);
+        context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            statusCode = (int)HttpStatusCode.InternalServerError,
+            message = "An unexpected error occurred.",
+            detailed
+        });
     });
 });
 
@@ -60,16 +99,15 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerDocumentation();
 }
 
-// Temporarily disable until ALB is fully configured
-//app.UseHttpsRedirection();
+// Re-enable once ALB TLS is confirmed:
+// app.UseHttpsRedirection();
 
+// ORDER MATTERS: authentication before authorization.
+app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/health", () => Results.Ok(new
-{
-    status = "Healthy",
-    timestamp = DateTime.UtcNow
-}));
+app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }))
+   .AllowAnonymous();
 
 app.MapControllers();
 

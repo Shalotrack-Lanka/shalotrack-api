@@ -1,10 +1,12 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]   // service enforces per-vehicle ownership + staff-only GetAll
 public class DeviceStatusController : ControllerBase
 {
     private readonly IDeviceStatusService _deviceStatusService;
@@ -16,7 +18,7 @@ public class DeviceStatusController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieves the status of all GPS devices.
+    /// Retrieves the status of all GPS devices. Staff only (enforced in service).
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetAll()
@@ -27,7 +29,7 @@ public class DeviceStatusController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieves the status of a GPS device.
+    /// Retrieves the status of a GPS device. Ownership enforced in service.
     /// </summary>
     [HttpGet("device/{deviceId:guid}")]
     public async Task<IActionResult> GetByDevice(Guid deviceId)
@@ -38,7 +40,7 @@ public class DeviceStatusController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieves the device status assigned to a vehicle.
+    /// Retrieves the device status assigned to a vehicle. Ownership enforced in service.
     /// </summary>
     [HttpGet("vehicle/{vehicleId:guid}")]
     public async Task<IActionResult> GetByVehicle(Guid vehicleId)

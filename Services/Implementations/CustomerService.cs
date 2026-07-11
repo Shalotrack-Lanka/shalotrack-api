@@ -7,16 +7,20 @@ using ShaloTrack_API.Repositories.Interfaces;
 using ShaloTrack_API.Responses;
 using ShaloTrack_API.Services.Interfaces;
 using System.Net;
+using ShaloTrack_API.Auth;
 
 namespace ShaloTrack_API.Services.Implementations;
 
 public class CustomerService : ICustomerService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUser _currentUser;
 
-    public CustomerService(IUnitOfWork unitOfWork)
+    //constructor method
+    public CustomerService(IUnitOfWork unitOfWork, ICurrentUser currentUser)
     {
         _unitOfWork = unitOfWork;
+        _currentUser = currentUser;
     }
 
     public async Task<ApiResponse<IReadOnlyList<CustomerResponseDto>>> GetAllAsync()
@@ -61,6 +65,25 @@ public class CustomerService : ICustomerService
     public async Task<ApiResponse<CustomerResponseDto>> CreateAsync(CreateCustomerDto dto)
     {
         // Business validation
+        var uid = _currentUser.FirebaseUid;
+        if (string.IsNullOrEmpty(uid))
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.Unauthorized,
+                "Authentication required.",
+                "A verified account is required to create a customer profile."
+            );
+        }
+
+        if (await _unitOfWork.Customers.GetByFirebaseUidAsync(uid) is not null)
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.Conflict,
+                "Profile already exists.",
+                "This account already has a customer profile."
+            );
+        }
+
         if (await _unitOfWork.Customers.GetByEmailAsync(dto.Email) is not null)
         {
             return ApiResponse<CustomerResponseDto>.Fail(
@@ -83,6 +106,7 @@ public class CustomerService : ICustomerService
         var customer = new Customer
         {
             CustomerId = Guid.NewGuid(),
+            FirebaseUid = uid,
             FullName = dto.FullName,
             Email = dto.Email,
             PhoneNumber = dto.PhoneNumber,
