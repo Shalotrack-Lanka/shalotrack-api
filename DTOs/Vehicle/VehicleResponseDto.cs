@@ -27,4 +27,6 @@ public class VehicleResponseDto
     public string? FuelType { get; set; }
 
     public bool HasGpsDevice { get; set; }
+
+    public String? Imei { get; set; }
 }

@@ -28,6 +28,7 @@ public class VehicleRepository : IVehicleRepository
         return await _context.Vehicles
             .Include(v => v.Customer)
             .Include(v => v.DeviceAssignments)
+            .ThenInclude(a => a.Device) //to get the IMEI
             .FirstOrDefaultAsync(v => v.VehicleId == vehicleId);
     }
 
@@ -35,6 +36,8 @@ public class VehicleRepository : IVehicleRepository
     {
         return await _context.Vehicles
             .Include(v => v.Customer)
+            .Include(v => v.DeviceAssignments)      // FIX: was missing entirely —
+            .ThenInclude(a => a.Device)          // HasGpsDevice was silently always false here
             .Where(v => v.CustomerId == customerId)
             .AsNoTracking()
             .OrderBy(v => v.VehicleNumber)

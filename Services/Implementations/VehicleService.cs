@@ -265,6 +265,9 @@ public class VehicleService : IVehicleService
 
     private static VehicleResponseDto ToDto(Vehicle vehicle)
     {
+        var activeAssignment = vehicle.DeviceAssignments
+            .FirstOrDefault(a => a.Status == Enums.AssignmentStatus.Active);
+
         return new VehicleResponseDto
         {
             VehicleId = vehicle.VehicleId,
@@ -279,7 +282,8 @@ public class VehicleService : IVehicleService
             Color = vehicle.Color,
             VehicleType = vehicle.VehicleType,
             FuelType = vehicle.FuelType,
-            HasGpsDevice = vehicle.DeviceAssignments.Any(a => a.Status == Enums.AssignmentStatus.Active)
+            HasGpsDevice = activeAssignment != null,
+            Imei = activeAssignment?.Device?.ImeiNumber   // NEW
         };
     }
 }
