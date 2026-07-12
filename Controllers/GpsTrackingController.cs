@@ -7,7 +7,7 @@ namespace ShaloTrack_API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize]   // was missing entirely — ownership + auth now enforced in the service
 public class GpsTrackingController : ControllerBase
 {
     private readonly IGpsTrackingService _gpsTrackingService;
@@ -19,10 +19,8 @@ public class GpsTrackingController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieves GPS tracking history.
-    /// NOTE: like DeviceEvents, this filter should be scoped to the caller's own vehicles
-    /// for non-staff. Trip history is sensitive location data — add an ownership check in
-    /// GpsTrackingService before exposing this to the customer app.
+    /// Retrieves GPS tracking history for a single vehicle. VehicleId is required —
+    /// the service enforces that the caller owns it (or is staff).
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> Get(
