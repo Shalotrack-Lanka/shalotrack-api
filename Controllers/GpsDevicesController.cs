@@ -81,4 +81,16 @@ public class GpsDevicesController : ControllerBase
 
         return StatusCode(response.StatusCode, response);
     }
+
+    /// <summary>
+    /// Customer-facing IMEI lookup for device linking. Any authenticated customer can
+    /// call this — physical possession of the IMEI (printed on the device) is the
+    /// authorization, not identity-based ownership.
+    /// </summary>
+    [HttpGet("lookup/{imei}")]
+    public async Task<IActionResult> LookupByImei(string imei)
+    {
+        var response = await _gpsDeviceService.LookupByImeiAsync(imei);
+        return StatusCode(response.StatusCode, response);
+    }
 }

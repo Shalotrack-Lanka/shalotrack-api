@@ -33,6 +33,7 @@ public class GpsDeviceRepository : IGpsDeviceRepository
     public async Task<GpsDevice?> GetByImeiAsync(string imei)
     {
         return await _context.GpsDevices
+            .Include(d => d.DeviceAssignments) // to check the assignment status of the gps device
             .FirstOrDefaultAsync(d => d.ImeiNumber == imei);
     }
 

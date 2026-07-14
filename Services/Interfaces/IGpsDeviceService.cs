@@ -16,4 +16,6 @@ public interface IGpsDeviceService
         UpdateGpsDeviceDto dto);
 
     Task<ApiResponse<string>> DeleteAsync(Guid deviceId);
+
+    Task<ApiResponse<DeviceLookupResponseDto>> LookupByImeiAsync(string imei);
 }

@@ -174,6 +174,44 @@ public class GpsDeviceService : IGpsDeviceService
             "GPS device deleted successfully."
         );
     }
+
+    public async Task<ApiResponse<DeviceLookupResponseDto>> LookupByImeiAsync(string imei)
+    {
+        if (string.IsNullOrWhiteSpace(imei))
+        {
+            return ApiResponse<DeviceLookupResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest,
+                "IMEI is required.",
+                "Please enter a valid IMEI number."
+            );
+        }
+
+        var device = await _unitOfWork.GpsDevices.GetByImeiAsync(imei);
+
+        if (device is null)
+        {
+            return ApiResponse<DeviceLookupResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound,
+                "Device not found.",
+                "No device with this IMEI exists. Please check the number and try again."
+            );
+        }
+
+        bool alreadyLinked = device.DeviceAssignments.Any(a => a.Status == AssignmentStatus.Active);
+        if (alreadyLinked)
+        {
+            return ApiResponse<DeviceLookupResponseDto>.Fail(
+                (int)HttpStatusCode.Conflict,
+                "Device already linked.",
+                "This device is already linked to another vehicle. Contact support if this is unexpected."
+            );
+        }
+
+        return ApiResponse<DeviceLookupResponseDto>.Ok(
+            new DeviceLookupResponseDto { DeviceId = device.DeviceId, ImeiNumber = device.ImeiNumber },
+            "Device found and available to link."
+        );
+    }
     private static GpsDeviceResponseDto ToDto(GpsDevice device)
     {
         return new GpsDeviceResponseDto
