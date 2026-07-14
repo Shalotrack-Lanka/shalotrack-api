@@ -6,6 +6,11 @@ using Microsoft.IdentityModel.Tokens;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.Extensions;
 using System.Net;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using OpenTelemetry.Logs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -47,6 +52,43 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
+
+// ---- OBSERVABILITY (OTel → SRE stack) ----
+var otelBase = "http://otel.shalotrack.internal:4318";
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(serviceName: "shalotrack-api"))
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation(options =>
+        {
+            // Don't let ALB health-check pings flood your traces every 30s
+            options.Filter = httpContext => httpContext.Request.Path != "/health";
+        })
+        .AddHttpClientInstrumentation()
+        .AddEntityFrameworkCoreInstrumentation()
+        .AddOtlpExporter(otlp =>
+        {
+            otlp.Endpoint = new Uri($"{otelBase}/v1/traces");
+            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+        }))
+    .WithMetrics(metrics => metrics
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddRuntimeInstrumentation()
+        .AddOtlpExporter(otlp =>
+        {
+            otlp.Endpoint = new Uri($"{otelBase}/v1/metrics");
+            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+        }));
+
+builder.Logging.AddOpenTelemetry(logging =>
+{
+    logging.AddOtlpExporter(otlp =>
+    {
+        otlp.Endpoint = new Uri($"{otelBase}/v1/logs");
+        otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
+    });
+});
 
 var app = builder.Build();
 
