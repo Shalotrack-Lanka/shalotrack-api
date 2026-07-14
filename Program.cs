@@ -54,7 +54,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
 // ---- OBSERVABILITY (OTel → SRE stack) ----
-var otelEndpoint = new Uri("http://otel.shalotrack.internal:4318");
+var otelBase = "http://otel.shalotrack.internal:4318";
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource => resource.AddService(serviceName: "shalotrack-api"))
@@ -68,7 +68,7 @@ builder.Services.AddOpenTelemetry()
         .AddEntityFrameworkCoreInstrumentation()
         .AddOtlpExporter(otlp =>
         {
-            otlp.Endpoint = otelEndpoint;
+            otlp.Endpoint = new Uri($"{otelBase}/v1/traces");
             otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
         }))
     .WithMetrics(metrics => metrics
@@ -77,7 +77,7 @@ builder.Services.AddOpenTelemetry()
         .AddRuntimeInstrumentation()
         .AddOtlpExporter(otlp =>
         {
-            otlp.Endpoint = otelEndpoint;
+            otlp.Endpoint = new Uri($"{otelBase}/v1/metrics");
             otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
         }));
 
@@ -85,7 +85,7 @@ builder.Logging.AddOpenTelemetry(logging =>
 {
     logging.AddOtlpExporter(otlp =>
     {
-        otlp.Endpoint = otelEndpoint;
+        otlp.Endpoint = new Uri($"{otelBase}/v1/logs");
         otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
     });
 });
