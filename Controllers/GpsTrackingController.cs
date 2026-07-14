@@ -30,4 +30,18 @@ public class GpsTrackingController : ControllerBase
 
         return StatusCode(response.StatusCode, response);
     }
+
+    /// <summary>
+    /// Computes trip/stop summary for a vehicle over a date range — start point,
+    /// end point, and count of trips/stops. A "stop" is 5+ continuous minutes stationary.
+    /// </summary>
+    [HttpGet("trips")]
+    public async Task<IActionResult> GetTrips(
+        [FromQuery] Guid vehicleId,
+        [FromQuery] DateTime from,
+        [FromQuery] DateTime to)
+    {
+        var response = await _gpsTrackingService.GetTripsSummaryAsync(vehicleId, from, to);
+        return StatusCode(response.StatusCode, response);
+    }
 }

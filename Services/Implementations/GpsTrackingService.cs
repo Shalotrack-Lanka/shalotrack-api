@@ -65,4 +65,116 @@ public class GpsTrackingService : IGpsTrackingService
             "GPS tracking records retrieved successfully."
         );
     }
+
+    public async Task<ApiResponse<TripsReportResponseDto>> GetTripsSummaryAsync(Guid vehicleId, DateTime from, DateTime to)
+    {
+        if (vehicleId == Guid.Empty)
+        {
+            return ApiResponse<TripsReportResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest,
+                "VehicleId is required.",
+                "A specific vehicleId must be provided."
+            );
+        }
+
+        if (to <= from)
+        {
+            return ApiResponse<TripsReportResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest,
+                "Invalid date range.",
+                "'to' must be after 'from'."
+            );
+        }
+
+        if (!_currentUser.IsStaff)
+        {
+            var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+            if (vehicle is null ||
+                !string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
+            {
+                return ApiResponse<TripsReportResponseDto>.Fail(
+                    (int)HttpStatusCode.NotFound,
+                    "Vehicle not found.",
+                    $"No vehicle exists with ID '{vehicleId}'."
+                );
+            }
+        }
+
+        var points = await _repository.GetPointsForTripsAsync(vehicleId, from, to);
+
+        const decimal speedThresholdKmh = 2m;              // ignores GPS jitter while parked
+        var stopThreshold = TimeSpan.FromMinutes(5);        // matches the V5 device's own stopped-report interval
+
+        var trips = new List<TripSummaryDto>();
+        int stopCount = 0;
+
+        TrackingPointRaw? tripStart = null;
+        TrackingPointRaw? lastMovingPoint = null;
+        DateTime? stationarySince = null;
+        bool stopAlreadyCounted = false;
+
+        foreach (var p in points)
+        {
+            bool isMoving = p.Speed > speedThresholdKmh;
+
+            if (isMoving)
+            {
+                tripStart ??= p;
+                lastMovingPoint = p;
+                stationarySince = null;
+                stopAlreadyCounted = false;
+            }
+            else
+            {
+                stationarySince ??= p.EventTime;
+                var elapsedStationary = p.EventTime - stationarySince.Value;
+
+                if (elapsedStationary >= stopThreshold && !stopAlreadyCounted)
+                {
+                    stopCount++;
+                    stopAlreadyCounted = true;
+
+                    if (tripStart is not null && lastMovingPoint is not null)
+                    {
+                        trips.Add(BuildTripSummary(tripStart, lastMovingPoint, inProgress: false));
+                        tripStart = null;
+                        lastMovingPoint = null;
+                    }
+                }
+            }
+        }
+
+        // Vehicle was still moving when the window ran out — close the trip as "in progress."
+        if (tripStart is not null && lastMovingPoint is not null)
+        {
+            trips.Add(BuildTripSummary(tripStart, lastMovingPoint, inProgress: true));
+        }
+
+        var report = new TripsReportResponseDto
+        {
+            VehicleId = vehicleId,
+            From = from,
+            To = to,
+            TripCount = trips.Count,
+            StopCount = stopCount,
+            Trips = trips
+        };
+
+        return ApiResponse<TripsReportResponseDto>.Ok(report, "Trips summary retrieved successfully.");
+    }
+
+    private static TripSummaryDto BuildTripSummary(TrackingPointRaw start, TrackingPointRaw end, bool inProgress)
+    {
+        return new TripSummaryDto
+        {
+            StartTime = start.EventTime,
+            EndTime = end.EventTime,
+            StartLatitude = start.Latitude,
+            StartLongitude = start.Longitude,
+            EndLatitude = end.Latitude,
+            EndLongitude = end.Longitude,
+            DurationMinutes = (decimal)(end.EventTime - start.EventTime).TotalMinutes,
+            InProgress = inProgress
+        };
+    }
 }

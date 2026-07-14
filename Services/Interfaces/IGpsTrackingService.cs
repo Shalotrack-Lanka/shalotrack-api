@@ -6,6 +6,6 @@ namespace ShaloTrack_API.Services.Interfaces;
 
 public interface IGpsTrackingService
 {
-    Task<ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>> GetAsync(
-        GpsTrackingFilter filter);
+    Task<ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>> GetAsync(GpsTrackingFilter filter);
+    Task<ApiResponse<TripsReportResponseDto>> GetTripsSummaryAsync(Guid vehicleId, DateTime from, DateTime to);
 }
