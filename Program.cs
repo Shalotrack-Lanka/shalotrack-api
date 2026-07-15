@@ -6,6 +6,8 @@ using Microsoft.IdentityModel.Tokens;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.Extensions;
 using ShaloTrack_API.Middlewares;
+using ShaloTrack_API.Hubs;
+using ShaloTrack_API.Services.Realtime;
 using System.Net;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
@@ -42,6 +44,24 @@ builder.Services
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2)
         };
+
+        // NEW -- SignalR's WebSocket transport can't set an Authorization header,
+        // so its clients send the token as a query string parameter instead. Only
+        // applies to /hubs/* paths -- normal REST routes still require a proper
+        // Authorization header.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorization(options =>
@@ -53,6 +73,10 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
+
+// ---- REAL-TIME PUSH (Option B) ----
+builder.Services.AddSignalR();
+builder.Services.AddHostedService<LocationNotificationListener>();
 
 // ---- OBSERVABILITY (OTel -> SRE stack) ----
 var otelBase = "http://otel.shalotrack.internal:4318";
@@ -160,5 +184,8 @@ app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = Dat
    .AllowAnonymous();
 
 app.MapControllers();
+
+// NEW -- the real-time push endpoint. Android clients connect here after login.
+app.MapHub<LocationHub>("/hubs/location");
 
 app.Run();
