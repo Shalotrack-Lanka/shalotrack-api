@@ -5,12 +5,9 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.Extensions;
+using ShaloTrack_API.Hubs;
+using ShaloTrack_API.Services.Realtime;
 using System.Net;
-using OpenTelemetry.Exporter;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
-using OpenTelemetry.Logs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,7 +20,7 @@ builder.Services.AddBusinessServices();
 builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();
 
-// ---- AUTH (was entirely missing) ----
+// ---- AUTH ----
 var firebaseProjectId = builder.Configuration["Firebase:ProjectId"]
     ?? throw new InvalidOperationException("Firebase:ProjectId is not configured.");
 
@@ -41,6 +38,25 @@ builder.Services
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2)
         };
+
+        // NEW -- SignalR's WebSocket transport can't set an Authorization header the
+        // way a normal HTTP request can, so its clients send the token as a query
+        // string parameter instead. This reads it into the same validation pipeline
+        // REST endpoints already use, but ONLY for requests to /hubs/*, so normal
+        // API routes still require a proper Authorization header.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorization(options =>
@@ -53,42 +69,9 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
-// ---- OBSERVABILITY (OTel → SRE stack) ----
-var otelBase = "http://otel.shalotrack.internal:4318";
-
-builder.Services.AddOpenTelemetry()
-    .ConfigureResource(resource => resource.AddService(serviceName: "shalotrack-api"))
-    .WithTracing(tracing => tracing
-        .AddAspNetCoreInstrumentation(options =>
-        {
-            // Don't let ALB health-check pings flood your traces every 30s
-            options.Filter = httpContext => httpContext.Request.Path != "/health";
-        })
-        .AddHttpClientInstrumentation()
-        .AddEntityFrameworkCoreInstrumentation()
-        .AddOtlpExporter(otlp =>
-        {
-            otlp.Endpoint = new Uri($"{otelBase}/v1/traces");
-            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-        }))
-    .WithMetrics(metrics => metrics
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddRuntimeInstrumentation()
-        .AddOtlpExporter(otlp =>
-        {
-            otlp.Endpoint = new Uri($"{otelBase}/v1/metrics");
-            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-        }));
-
-builder.Logging.AddOpenTelemetry(logging =>
-{
-    logging.AddOtlpExporter(otlp =>
-    {
-        otlp.Endpoint = new Uri($"{otelBase}/v1/logs");
-        otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-    });
-});
+// ---- REAL-TIME PUSH (NEW) ----
+builder.Services.AddSignalR();
+builder.Services.AddHostedService<LocationNotificationListener>();
 
 var app = builder.Build();
 
@@ -109,7 +92,6 @@ app.UseExceptionHandler(exceptionHandlerApp =>
         var isTimeout = exception?.Message.Contains("Timeout") == true
                         || exception?.InnerException?.Message.Contains("Timeout") == true;
 
-        // FIX: only expose internal error text in Development.
         string? detailed = app.Environment.IsDevelopment()
             ? (exception?.InnerException?.Message ?? exception?.Message)
             : null;
@@ -141,10 +123,8 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerDocumentation();
 }
 
-// Re-enable once ALB TLS is confirmed:
-// app.UseHttpsRedirection();
+// app.UseHttpsRedirection();  // still deferred, see earlier notes on ALB TLS termination
 
-// ORDER MATTERS: authentication before authorization.
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -152,5 +132,8 @@ app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = Dat
    .AllowAnonymous();
 
 app.MapControllers();
+
+// NEW -- the real-time push endpoint. Android clients connect here after login.
+app.MapHub<LocationHub>("/hubs/location");
 
 app.Run();
