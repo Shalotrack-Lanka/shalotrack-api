@@ -22,6 +22,8 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<GpsTracking> GpsTrackings => Set<GpsTracking>();
     public DbSet<CurrentLocation> CurrentLocations => Set<CurrentLocation>();
     public DbSet<DeviceEvent> DeviceEvents => Set<DeviceEvent>();
+    public DbSet<Alert> Alerts => Set<Alert>();
+    public DbSet<CustomerFcmToken> CustomerFcmTokens => Set<CustomerFcmToken>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -84,5 +86,9 @@ public class ShaloTrackDbContext : DbContext
             .HasOne(e => e.RawPacket)
             .WithMany(r => r.DeviceEvents)
             .HasForeignKey(e => e.RawPacketId);
+
+        modelBuilder.Entity<CustomerFcmToken>()
+            .HasIndex(t => t.FcmToken)
+            .IsUnique();
     }
 }

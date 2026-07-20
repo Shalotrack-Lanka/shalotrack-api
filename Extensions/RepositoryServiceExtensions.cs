@@ -17,6 +17,8 @@ public static class RepositoryServiceExtensions
         services.AddScoped<IDeviceStatusRepository, DeviceStatusRepository>();
         services.AddScoped<IGpsTrackingRepository, GpsTrackingRepository>();
         services.AddScoped<IDeviceEventRepository, DeviceEventRepository>();
+        services.AddScoped<IAlertRepository, AlertRepository>();                        // NEW
+        services.AddScoped<ICustomerFcmTokenRepository, CustomerFcmTokenRepository>();  // NEW
 
         // Unit of Work
         services.AddScoped<IUnitOfWork, UnitOfWork>();

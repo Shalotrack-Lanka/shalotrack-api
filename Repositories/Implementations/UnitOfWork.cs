@@ -15,19 +15,25 @@ public class UnitOfWork : IUnitOfWork
     public IVehicleRepository Vehicles { get; }
     public IGpsDeviceRepository GpsDevices { get; }
     public IDeviceAssignmentRepository DeviceAssignments { get; }
+    public IAlertRepository Alerts { get; }                       // NEW
+    public ICustomerFcmTokenRepository FcmTokens { get; }         // NEW
 
     public UnitOfWork(
         ShaloTrackDbContext context,
         ICustomerRepository customerRepository,
         IVehicleRepository vehicleRepository,
         IGpsDeviceRepository gpsDeviceRepository,
-        IDeviceAssignmentRepository deviceAssignmentRepository)
+        IDeviceAssignmentRepository deviceAssignmentRepository,
+        IAlertRepository alertRepository,                         // NEW
+        ICustomerFcmTokenRepository customerFcmTokenRepository)   // NEW
     {
         _context = context;
         Customers = customerRepository;
         Vehicles = vehicleRepository;
         GpsDevices = gpsDeviceRepository;
         DeviceAssignments = deviceAssignmentRepository;
+        Alerts = alertRepository;                                 // NEW
+        FcmTokens = customerFcmTokenRepository;                   // NEW
     }
 
     public async Task<int> SaveChangesAsync()

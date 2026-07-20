@@ -11,14 +11,14 @@ public static class BusinessServiceExtensions
     {
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<IVehicleService, VehicleService>();
-        services.AddScoped<IGpsDeviceService,GpsDeviceService>();
+        services.AddScoped<IGpsDeviceService, GpsDeviceService>();
         services.AddScoped<IDeviceAssignmentService, DeviceAssignmentService>();
         services.AddScoped<ICurrentLocationService, CurrentLocationService>();
         services.AddScoped<IDeviceStatusService, DeviceStatusService>();
         services.AddScoped<IGpsTrackingService, GpsTrackingService>();
         services.AddScoped<IDeviceEventService, DeviceEventService>();
+        services.AddScoped<IAlertService, AlertService>();   // NEW
         services.AddScoped<ICurrentUser, CurrentUser>();
-
         return services;
     }
 }

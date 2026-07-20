@@ -6,6 +6,8 @@ public interface IUnitOfWork
     IVehicleRepository Vehicles { get; }
     IGpsDeviceRepository GpsDevices { get; }
     IDeviceAssignmentRepository DeviceAssignments { get; }
+    IAlertRepository Alerts { get; }                        // NEW
+    ICustomerFcmTokenRepository FcmTokens { get; }           // NEW
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();
