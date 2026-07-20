@@ -39,18 +39,20 @@ The API acts as the single source of truth for all client applications. Business
 | Module | Status |
 |---|---|
 | API Foundation | ✅ Complete |
-| Authentication | ✅ Complete |
+| Authentication (Firebase JWT + ownership) | ✅ Complete |
 | Customer Management | ✅ Complete |
 | Vehicle Management | ✅ Complete |
 | GPS Device Management | ✅ Complete |
 | Device Assignment | ✅ Complete |
 | Current Location | ✅ Complete |
 | Device Status | ✅ Complete |
-| GPS Tracking History | 🚧 Next |
+| GPS Tracking History (Trips, Stops, Distance, Speed) | ✅ Complete |
+| Real-Time Location Push (Postgres NOTIFY + SignalR) | ✅ Complete |
+| Alerts & Notifications | 🚧 Foundation only — persistence + API done, push/trigger detection not yet built |
 | Device Events | ⏳ Planned |
 | Raw Packet Services | ⏳ Planned |
 
-**Current Version:** `v0.4.0` — Active Development
+**Current Version:** `v0.5.0` — Active Development
 
 ---
 
@@ -209,10 +211,17 @@ Telemetry repositories are read-only, use `AsNoTracking()`, and project directly
 
 ### Authentication ✅
 
-- JWT Authentication
-- Login / Logout
-- Token validation and refresh
-- Role-based authorization
+- Firebase JWT bearer authentication (validated against Google's own signing
+  keys — no custom login/token-issuing endpoint; the client authenticates
+  with Firebase directly and presents that token to the API)
+- Deny-by-default authorization policy — every endpoint requires a valid
+  token unless explicitly marked `[AllowAnonymous]`
+- Per-resource ownership enforcement (`[OwnsCustomer]` attribute for
+  `{customerId}` routes; service-layer checks for vehicle/telemetry routes
+  keyed by a resource ID rather than a customer ID)
+- Role-based authorization for staff-only endpoints (`Admin`, `Dealer`)
+- 404 (not 403) returned for non-owned resources, to avoid confirming
+  resource existence to an unauthorized caller
 
 ---
 
@@ -273,14 +282,59 @@ Telemetry repositories are read-only, use `AsNoTracking()`, and project directly
 
 ---
 
+### GPS Tracking History ✅
+
+- Raw tracking point retrieval, ownership-scoped, server-side capped at 500
+  points per request
+- Trip/stop report computation: given a vehicle and date range, returns
+  individual trips (start/end point and time, duration, real route distance,
+  max/avg speed) and individual stops (location, duration)
+- A "stop" is 5+ continuous minutes stationary; a "trip" additionally
+  requires 100m+ of real displacement, to filter GPS jitter (drift while
+  parked) from being misread as a trip
+- Distance is the true route distance (sum of point-to-point movement),
+  not straight-line start-to-end displacement
+
+---
+
+### Real-Time Location Push ✅
+
+- A Postgres trigger fires `pg_notify` on every `CurrentLocations`
+  insert/update
+- A dedicated background service (on a persistent, session-pooled DB
+  connection — required, since `LISTEN`/`NOTIFY` is incompatible with
+  transaction-mode pooling) listens for these notifications
+- Pushes are relayed to connected clients via a SignalR hub, scoped to a
+  per-vehicle group; joining a group enforces the same ownership rule as
+  REST endpoints
+- Typical end-to-end latency: under two seconds from database write to
+  client receipt, replacing what was previously a fixed polling interval
+
+---
+
+### Alerts & Notifications 🚧 (Foundation only)
+
+- Alert persistence (`Alerts` table) and retrieval, ownership-scoped to the
+  caller's own vehicles
+- Mark-as-read
+- FCM device token registration endpoint (`CustomerFcmTokens` table)
+- **Not yet built:** actual push delivery, and the trigger logic that
+  detects alert-worthy conditions (ignition change, overspeed, power-cut,
+  low battery, device offline, geofence). The data model supports these
+  alert types (`AlertType` enum), but nothing currently creates an `Alert`
+  row automatically — only manual/test inserts exist right now.
+
+---
+
 ## Current Endpoints
 
 ### Authentication
-```
-POST   /api/auth/login
-POST   /api/auth/logout
-POST   /api/auth/refresh-token
-```
+
+No login/token-issuing endpoints exist on this API. The client authenticates
+directly with Firebase (phone OTP + email verification) and presents the
+resulting Firebase JWT as a Bearer token on every request. The API validates
+it against Google's public signing keys — there is nothing to log in
+"to" here.
 
 ### Customers
 ```
@@ -329,6 +383,19 @@ GET    /api/currentlocations/device/{deviceId}
 GET    /api/devicestatus
 GET    /api/devicestatus/device/{deviceId}
 GET    /api/devicestatus/vehicle/{vehicleId}
+```
+
+### GPS Tracking
+```
+GET    /api/gpstracking?vehicleId={id}&from={iso}&to={iso}     ← raw points, capped at 500
+GET    /api/gpstracking/trips?vehicleId={id}&from={iso}&to={iso}  ← trip/stop report
+```
+
+### Alerts
+```
+GET    /api/alerts?page={n}&pageSize={n}      ← caller's own alert history
+PATCH  /api/alerts/{alertId}/read              ← mark as read
+POST   /api/alerts/register-token              ← register/refresh FCM device token
 ```
 
 All responses use the `ApiResponse<T>` envelope:
@@ -380,11 +447,13 @@ Current rules:
 - GPS Device Module (IMEI validation, registration, activation)
 
 ### v0.3.0
-- Authentication (JWT, login, token refresh)
 - Device Assignment Module
 - Assignment history preservation
 - Transaction support for multi-step operations
 - Active assignment validation (one device per vehicle constraint)
+- *(Note: this version's original changelog entry claimed JWT
+  authentication was complete. It was not — the API had no authentication
+  at all until v0.4.1, below. Corrected here for accuracy.)*
 
 ### v0.4.0 — Telemetry Foundation
 - Current Location API (live vehicle/device location lookup)
@@ -394,17 +463,51 @@ Current rules:
 - Read/write architectural separation between business and telemetry modules
 - Performance improvements: `AsNoTracking()`, projection queries, reduced entity materialization
 
+### v0.4.1 — Security Hardening
+- **Discovered the API had no authentication at all** — every endpoint was
+  publicly readable/writable, and customer-scoped routes had no ownership
+  check (IDOR on all of them)
+- Firebase JWT bearer authentication added, with a deny-by-default
+  fallback policy
+- `Customer.FirebaseUid` added, linking Firebase accounts to customer
+  records
+- `[OwnsCustomer]` filter for `{customerId}` routes; service-layer
+  ownership checks for vehicle/telemetry routes keyed by a resource ID
+- Staff-only role restriction on list ("get all") endpoints
+- Production exception handler fixed to stop leaking raw database error
+  details
+
+### v0.5.0 — Tracking, Real-Time, and Alerts Foundation
+- GPS Tracking History: trip/stop report computation (distance, duration,
+  max/avg speed per trip; individual stop records with location + duration)
+- GPS-jitter filtering: a "trip" requires genuine displacement, not just a
+  transient above-threshold speed reading
+- Real-time location push: Postgres `NOTIFY` trigger + a persistent
+  background listener + a SignalR hub, replacing fixed-interval polling
+  with sub-2-second live updates
+- Alerts & Notifications foundation: persistence, retrieval, mark-as-read,
+  and FCM token registration (push delivery and trigger detection are not
+  yet built — see Roadmap)
+
 ---
 
 ## Roadmap
 
-### v0.5.0 — Tracking & Events
-- GPS Tracking History
+### v0.6.0 — Alerts & Notifications (Full)
+- FCM push delivery
+- Trigger detection for Ignition, Overspeed, Power-cut, and Low-battery
+  (state-change alerts — can reuse the existing NOTIFY/SignalR pipeline)
+- Device offline detection (a periodic background check, not an event
+  trigger, since silence isn't something a row-write can announce)
+- Geofencing (new schema — no fence concept exists yet; boundary
+  definition, management, and crossing detection)
+
+### v0.7.0 — Events & Admin Tooling
 - Device Events
 - Raw Packets (Admin)
 - Filtering and pagination
 
-### v0.6.0 — Platform Hardening
+### v0.8.0 — Platform Hardening
 - Centralized logging
 - Global exception handling middleware
 - Rate limiting
