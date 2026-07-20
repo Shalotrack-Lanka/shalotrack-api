@@ -8,4 +8,5 @@ public class TripsReportResponseDto
     public int TripCount { get; set; }
     public int StopCount { get; set; }
     public List<TripSummaryDto> Trips { get; set; } = new();
+    public List<StopSummaryDto> Stops { get; set; } = new();
 }

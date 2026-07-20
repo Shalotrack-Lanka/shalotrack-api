@@ -61,12 +61,15 @@ public class GpsTrackingService : IGpsTrackingService
     }
 
     /// <summary>
-    /// Computes trip/stop summary for a vehicle over a date range: start point, end
-    /// point, distance, and counts of trips/stops. A "stop" is 5+ continuous minutes
-    /// stationary. A "trip" additionally requires at least 100m of straight-line
-    /// displacement (filters GPS jitter while parked from being misread as a trip).
-    /// DistanceKm is the real route distance -- sum of point-to-point movement along
-    /// the trip -- not the straight-line displacement used for the jitter filter.
+    /// Computes trip and stop reports for a vehicle over a date range.
+    ///
+    /// A "stop" is 5+ continuous minutes stationary -- recorded as an individual
+    /// StopSummaryDto (location + full duration), not just a count.
+    ///
+    /// A "trip" additionally requires at least 100m of straight-line displacement
+    /// between its start and end (filters GPS jitter while parked from being
+    /// misread as a trip). Each trip also carries DistanceKm (real route distance,
+    /// summed point-to-point) and MaxSpeed/AvgSpeed for the Speed report tab.
     /// </summary>
     public async Task<ApiResponse<TripsReportResponseDto>> GetTripsSummaryAsync(Guid vehicleId, DateTime from, DateTime to)
     {
@@ -109,43 +112,79 @@ public class GpsTrackingService : IGpsTrackingService
         var stopThreshold = TimeSpan.FromMinutes(5);
 
         var trips = new List<TripSummaryDto>();
+        var stops = new List<StopSummaryDto>();
         int stopCount = 0;
 
+        // Trip tracking state
         TrackingPointRaw? tripStart = null;
         TrackingPointRaw? lastMovingPoint = null;
         TrackingPointRaw? previousPointInTrip = null;
         double tripDistanceMeters = 0;
+        decimal tripMaxSpeed = 0;
+        decimal tripSpeedSum = 0;
+        int tripSpeedPointCount = 0;
+
+        // Stop tracking state
         DateTime? stationarySince = null;
+        TrackingPointRaw? stopStartPoint = null;
+        TrackingPointRaw? lastStationaryPoint = null;
         bool stopAlreadyCounted = false;
 
         foreach (var p in points)
         {
             bool isMoving = p.Speed > speedThresholdKmh;
 
-            // Trip bookkeeping: open a new trip, or accumulate real route distance
-            // for every point (moving or a brief sub-threshold stop) while one is open.
-            if (isMoving && tripStart is null)
-            {
-                tripStart = p;
-                previousPointInTrip = p;
-                tripDistanceMeters = 0;
-            }
-            else if (tripStart is not null && previousPointInTrip is not null)
-            {
-                tripDistanceMeters += HaversineMeters(
-                    (double)previousPointInTrip.Latitude, (double)previousPointInTrip.Longitude,
-                    (double)p.Latitude, (double)p.Longitude);
-                previousPointInTrip = p;
-            }
-
             if (isMoving)
             {
-                lastMovingPoint = p;
+                // Movement resumed -- finalize any qualifying stop that just ended.
+                if (stopStartPoint is not null && stopAlreadyCounted)
+                {
+                    stops.Add(BuildStopSummary(stopStartPoint, lastStationaryPoint!, inProgress: false));
+                }
+                stopStartPoint = null;
+                lastStationaryPoint = null;
                 stationarySince = null;
                 stopAlreadyCounted = false;
+
+                if (tripStart is null)
+                {
+                    tripStart = p;
+                    previousPointInTrip = p;
+                    tripDistanceMeters = 0;
+                    tripMaxSpeed = 0;
+                    tripSpeedSum = 0;
+                    tripSpeedPointCount = 0;
+                }
+                else if (previousPointInTrip is not null)
+                {
+                    tripDistanceMeters += HaversineMeters(
+                        (double)previousPointInTrip.Latitude, (double)previousPointInTrip.Longitude,
+                        (double)p.Latitude, (double)p.Longitude);
+                    previousPointInTrip = p;
+                }
+
+                lastMovingPoint = p;
+                if (p.Speed > tripMaxSpeed) tripMaxSpeed = p.Speed;
+                tripSpeedSum += p.Speed;
+                tripSpeedPointCount++;
             }
             else
             {
+                // Sub-threshold stationary point while a trip is open -- still counts
+                // toward the trip's distance/speed stats (a brief idle moment
+                // shouldn't break the trip).
+                if (tripStart is not null && previousPointInTrip is not null)
+                {
+                    tripDistanceMeters += HaversineMeters(
+                        (double)previousPointInTrip.Latitude, (double)previousPointInTrip.Longitude,
+                        (double)p.Latitude, (double)p.Longitude);
+                    previousPointInTrip = p;
+                    tripSpeedSum += p.Speed;
+                    tripSpeedPointCount++;
+                }
+
+                stopStartPoint ??= p;
+                lastStationaryPoint = p;
                 stationarySince ??= p.EventTime;
                 var elapsedStationary = p.EventTime - stationarySince.Value;
 
@@ -156,28 +195,29 @@ public class GpsTrackingService : IGpsTrackingService
 
                     if (tripStart is not null && lastMovingPoint is not null)
                     {
-                        // Straight-line displacement decides whether this was a REAL
-                        // trip (jitter has near-zero net displacement even if some
-                        // noisy distance accumulated above).
                         double displacementMeters = HaversineMeters(
                             (double)tripStart.Latitude, (double)tripStart.Longitude,
                             (double)lastMovingPoint.Latitude, (double)lastMovingPoint.Longitude);
 
                         if (displacementMeters >= minTripDisplacementMeters)
                         {
-                            trips.Add(BuildTripSummary(tripStart, lastMovingPoint, tripDistanceMeters, inProgress: false));
+                            decimal avgSpeed = tripSpeedPointCount > 0 ? tripSpeedSum / tripSpeedPointCount : 0;
+                            trips.Add(BuildTripSummary(tripStart, lastMovingPoint, tripDistanceMeters, tripMaxSpeed, avgSpeed, inProgress: false));
                         }
 
                         tripStart = null;
                         lastMovingPoint = null;
                         previousPointInTrip = null;
                         tripDistanceMeters = 0;
+                        tripMaxSpeed = 0;
+                        tripSpeedSum = 0;
+                        tripSpeedPointCount = 0;
                     }
                 }
             }
         }
 
-        // Vehicle was still moving when the window ran out — close the trip as "in progress."
+        // Window ended mid-trip -- close it as "in progress."
         if (tripStart is not null && lastMovingPoint is not null)
         {
             double displacementMeters = HaversineMeters(
@@ -186,8 +226,15 @@ public class GpsTrackingService : IGpsTrackingService
 
             if (displacementMeters >= minTripDisplacementMeters)
             {
-                trips.Add(BuildTripSummary(tripStart, lastMovingPoint, tripDistanceMeters, inProgress: true));
+                decimal avgSpeed = tripSpeedPointCount > 0 ? tripSpeedSum / tripSpeedPointCount : 0;
+                trips.Add(BuildTripSummary(tripStart, lastMovingPoint, tripDistanceMeters, tripMaxSpeed, avgSpeed, inProgress: true));
             }
+        }
+
+        // Window ended mid-stop -- close it as "in progress."
+        if (stopStartPoint is not null && stopAlreadyCounted)
+        {
+            stops.Add(BuildStopSummary(stopStartPoint, lastStationaryPoint!, inProgress: true));
         }
 
         var report = new TripsReportResponseDto
@@ -197,13 +244,16 @@ public class GpsTrackingService : IGpsTrackingService
             To = to,
             TripCount = trips.Count,
             StopCount = stopCount,
-            Trips = trips
+            Trips = trips,
+            Stops = stops
         };
 
         return ApiResponse<TripsReportResponseDto>.Ok(report, "Trips summary retrieved successfully.");
     }
 
-    private static TripSummaryDto BuildTripSummary(TrackingPointRaw start, TrackingPointRaw end, double distanceMeters, bool inProgress)
+    private static TripSummaryDto BuildTripSummary(
+        TrackingPointRaw start, TrackingPointRaw end, double distanceMeters,
+        decimal maxSpeed, decimal avgSpeed, bool inProgress)
     {
         return new TripSummaryDto
         {
@@ -215,6 +265,21 @@ public class GpsTrackingService : IGpsTrackingService
             EndLongitude = end.Longitude,
             DurationMinutes = (decimal)(end.EventTime - start.EventTime).TotalMinutes,
             DistanceKm = (decimal)(distanceMeters / 1000.0),
+            MaxSpeed = maxSpeed,
+            AvgSpeed = avgSpeed,
+            InProgress = inProgress
+        };
+    }
+
+    private static StopSummaryDto BuildStopSummary(TrackingPointRaw start, TrackingPointRaw end, bool inProgress)
+    {
+        return new StopSummaryDto
+        {
+            StartTime = start.EventTime,
+            EndTime = end.EventTime,
+            Latitude = start.Latitude,
+            Longitude = start.Longitude,
+            DurationMinutes = (decimal)(end.EventTime - start.EventTime).TotalMinutes,
             InProgress = inProgress
         };
     }
