@@ -11,24 +11,26 @@ using ShaloTrack_API.Repositories.Interfaces;
 namespace ShaloTrack_API.Services.Realtime;
 
 /// <summary>
-/// Holds a persistent Postgres connection, runs LISTEN location_updates, pushes each
-/// notification to the matching SignalR group, AND (new) checks each update for
-/// alert-worthy state changes -- ignition on/off, overspeed -- persisting an Alert
-/// row when one fires.
+/// Holds a persistent Postgres connection and listens on TWO channels:
+///   - location_updates      (CurrentLocations writes -- position, live push)
+///   - device_status_updates (DeviceStatuses writes -- battery, power, ignition)
 ///
-/// CRITICAL: the connection string this uses (ConnectionStrings:RealtimeConnection)
-/// MUST use Supabase's SESSION pooler (port 5432), never the transaction pooler
-/// (port 6543). See earlier setup notes -- this is the same class of misconfiguration
-/// that caused a production outage earlier in this project.
+/// Both are handled over the SAME connection (Postgres LISTEN supports multiple
+/// channels per connection) rather than opening a second one.
 ///
-/// KNOWN TRADEOFF: ignition-change and overspeed-episode detection rely on an
-/// in-memory cache of each device's last-seen state, not a persisted one. This is
-/// lost on process restart -- a genuine transition happening right at restart could
-/// be missed (the next notification after restart has nothing to compare against,
-/// so no alert fires for that specific transition). Acceptable for now: a missed
-/// alert is a low-severity failure, not a safety issue. If this becomes a real
-/// problem in practice, the fix is to persist last-known state to the database
-/// instead of memory.
+/// Alert detection:
+///   - Ignition change: watched from BOTH sources, sharing one in-memory cache
+///     keyed by DeviceId, so a change reported by either table only fires once.
+///   - Overspeed: from location_updates only, fires once per speeding episode.
+///   - Power-cut: from device_status_updates only, fires on Connected->Disconnected.
+///   - Low-battery: from device_status_updates only, fires once per "below
+///     threshold" episode (not on every single low reading).
+///
+/// CRITICAL: RealtimeConnection MUST use the session pooler (port 5432), never
+/// the transaction pooler. See earlier setup notes.
+///
+/// KNOWN TRADEOFF: all state is tracked in memory, lost on process restart.
+/// Acceptable for now -- a missed alert is low severity, not a safety issue.
 /// </summary>
 public class LocationNotificationListener : BackgroundService
 {
@@ -38,8 +40,8 @@ public class LocationNotificationListener : BackgroundService
     private readonly ILogger<LocationNotificationListener> _logger;
 
     private const decimal OverspeedThresholdKmh = 80m;
+    private const int LowBatteryThresholdPercent = 20;
 
-    // Keyed by DeviceId -- see "KNOWN TRADEOFF" above.
     private readonly ConcurrentDictionary<Guid, DeviceAlertState> _deviceStates = new();
 
     public LocationNotificationListener(
@@ -70,11 +72,18 @@ public class LocationNotificationListener : BackgroundService
                 {
                     try
                     {
-                        await HandleNotification(args.Payload);
+                        if (args.Channel == "location_updates")
+                        {
+                            await HandleLocationNotification(args.Payload);
+                        }
+                        else if (args.Channel == "device_status_updates")
+                        {
+                            await HandleDeviceStatusNotification(args.Payload);
+                        }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Error handling location notification");
+                        _logger.LogError(ex, "Error handling notification on channel {Channel}", args.Channel);
                     }
                 };
 
@@ -82,8 +91,13 @@ public class LocationNotificationListener : BackgroundService
                 {
                     await cmd.ExecuteNonQueryAsync(stoppingToken);
                 }
+                await using (var cmd = new NpgsqlCommand("LISTEN device_status_updates;", connection))
+                {
+                    await cmd.ExecuteNonQueryAsync(stoppingToken);
+                }
 
-                _logger.LogInformation("LocationNotificationListener: listening on location_updates.");
+                _logger.LogInformation(
+                    "LocationNotificationListener: listening on location_updates and device_status_updates.");
 
                 while (!stoppingToken.IsCancellationRequested)
                 {
@@ -102,7 +116,9 @@ public class LocationNotificationListener : BackgroundService
         }
     }
 
-    private async Task HandleNotification(string payload)
+    // ---- location_updates ----
+
+    private async Task HandleLocationNotification(string payload)
     {
         var data = JsonSerializer.Deserialize<LocationNotificationPayload>(
             payload,
@@ -114,76 +130,134 @@ public class LocationNotificationListener : BackgroundService
             .Group(data.VehicleId.ToString()!)
             .SendAsync("LocationUpdated", data);
 
-        // NEW -- alert trigger detection, on top of the existing push.
         if (data.DeviceId is not null)
         {
-            await CheckForAlertsAsync(data);
+            await CheckLocationAlertsAsync(data);
         }
     }
 
-    private async Task CheckForAlertsAsync(LocationNotificationPayload data)
+    private async Task CheckLocationAlertsAsync(LocationNotificationPayload data)
     {
         var deviceId = data.DeviceId!.Value;
-        _deviceStates.TryGetValue(deviceId, out var previous);
+        var state = _deviceStates.GetOrAdd(deviceId, _ => new DeviceAlertState());
 
         var alertsToCreate = new List<Alert>();
 
-        // Ignition change -- only fires when we have a previous reading to compare
-        // against (the very first sighting of a device is never itself a "change").
-        if (previous is not null && previous.IgnitionStatus != data.IgnitionStatus)
+        lock (state)
         {
-            alertsToCreate.Add(BuildAlert(
-                data,
-                data.IgnitionStatus ? AlertType.IgnitionOn : AlertType.IgnitionOff,
-                data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off"));
+            if (state.IgnitionStatus.HasValue && state.IgnitionStatus.Value != data.IgnitionStatus)
+            {
+                alertsToCreate.Add(BuildAlert(
+                    data.VehicleId!.Value, data.DeviceId, data.Latitude, data.Longitude,
+                    data.IgnitionStatus ? AlertType.IgnitionOn : AlertType.IgnitionOff,
+                    data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off"));
+            }
+            state.IgnitionStatus = data.IgnitionStatus;
+
+            bool isSpeeding = data.Speed > OverspeedThresholdKmh;
+            if (isSpeeding && !state.IsSpeeding)
+            {
+                alertsToCreate.Add(BuildAlert(
+                    data.VehicleId!.Value, data.DeviceId, data.Latitude, data.Longitude,
+                    AlertType.Overspeed,
+                    $"Speed exceeded {OverspeedThresholdKmh} km/h (reached {data.Speed:F0} km/h)"));
+            }
+            state.IsSpeeding = isSpeeding;
         }
 
-        // Overspeed -- fires once per speeding episode (transition into speeding),
-        // not on every single update while still over the threshold.
-        bool isSpeeding = data.Speed > OverspeedThresholdKmh;
-        bool wasSpeeding = previous?.IsSpeeding ?? false;
-        if (isSpeeding && !wasSpeeding)
+        if (alertsToCreate.Count > 0)
         {
-            alertsToCreate.Add(BuildAlert(
-                data,
-                AlertType.Overspeed,
-                $"Speed exceeded {OverspeedThresholdKmh} km/h (reached {data.Speed:F0} km/h)"));
+            await PersistAlertsAsync(alertsToCreate, data.VehicleId!.Value);
+        }
+    }
+
+    // ---- device_status_updates ----
+
+    private async Task HandleDeviceStatusNotification(string payload)
+    {
+        var data = JsonSerializer.Deserialize<DeviceStatusNotificationPayload>(
+            payload,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        if (data?.VehicleId is null || data.DeviceId is null) return;
+
+        await CheckDeviceStatusAlertsAsync(data);
+    }
+
+    private async Task CheckDeviceStatusAlertsAsync(DeviceStatusNotificationPayload data)
+    {
+        var deviceId = data.DeviceId!.Value;
+        var state = _deviceStates.GetOrAdd(deviceId, _ => new DeviceAlertState());
+
+        var alertsToCreate = new List<Alert>();
+
+        lock (state)
+        {
+            if (state.IgnitionStatus.HasValue && state.IgnitionStatus.Value != data.IgnitionStatus)
+            {
+                alertsToCreate.Add(BuildAlert(
+                    data.VehicleId!.Value, data.DeviceId, null, null,
+                    data.IgnitionStatus ? AlertType.IgnitionOn : AlertType.IgnitionOff,
+                    data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off"));
+            }
+            state.IgnitionStatus = data.IgnitionStatus;
+
+            // Power-cut: PowerStatus 0 = Connected, 1 = Disconnected.
+            bool isDisconnected = data.PowerStatus == 1;
+            if (isDisconnected && state.PowerStatus is not true)
+            {
+                alertsToCreate.Add(BuildAlert(
+                    data.VehicleId!.Value, data.DeviceId, null, null,
+                    AlertType.PowerCut,
+                    "Device power disconnected"));
+            }
+            state.PowerStatus = isDisconnected;
+
+            bool isLowBattery = data.BatteryLevel < LowBatteryThresholdPercent;
+            if (isLowBattery && !state.IsLowBattery)
+            {
+                alertsToCreate.Add(BuildAlert(
+                    data.VehicleId!.Value, data.DeviceId, null, null,
+                    AlertType.LowBattery,
+                    $"Battery level dropped below {LowBatteryThresholdPercent}% (currently {data.BatteryLevel}%)"));
+            }
+            state.IsLowBattery = isLowBattery;
         }
 
-        _deviceStates[deviceId] = new DeviceAlertState
+        if (alertsToCreate.Count > 0)
         {
-            IgnitionStatus = data.IgnitionStatus,
-            IsSpeeding = isSpeeding
-        };
+            await PersistAlertsAsync(alertsToCreate, data.VehicleId!.Value);
+        }
+    }
 
-        if (alertsToCreate.Count == 0) return;
+    // ---- shared persistence ----
 
-        // BackgroundService runs at singleton scope; IUnitOfWork is scoped, so a
-        // fresh scope is created per notification that actually needs to write.
+    private async Task PersistAlertsAsync(List<Alert> alerts, Guid vehicleId)
+    {
         using var scope = _scopeFactory.CreateScope();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
-        foreach (var alert in alertsToCreate)
+        foreach (var alert in alerts)
         {
             await unitOfWork.Alerts.AddAsync(alert);
         }
         await unitOfWork.SaveChangesAsync();
 
-        _logger.LogInformation(
-            "Created {Count} alert(s) for vehicle {VehicleId}",
-            alertsToCreate.Count, data.VehicleId);
+        _logger.LogInformation("Created {Count} alert(s) for vehicle {VehicleId}", alerts.Count, vehicleId);
     }
 
-    private static Alert BuildAlert(LocationNotificationPayload data, AlertType type, string message)
+    private static Alert BuildAlert(
+        Guid vehicleId, Guid? deviceId, decimal? latitude, decimal? longitude,
+        AlertType type, string message)
     {
         return new Alert
         {
-            VehicleId = data.VehicleId!.Value,
-            DeviceId = data.DeviceId,
+            VehicleId = vehicleId,
+            DeviceId = deviceId,
             AlertType = type,
             Message = message,
-            Latitude = data.Latitude,
-            Longitude = data.Longitude,
+            Latitude = latitude,
+            Longitude = longitude,
             TriggeredAt = DateTime.UtcNow,
             IsRead = false,
             CreatedAt = DateTime.UtcNow
@@ -192,8 +266,10 @@ public class LocationNotificationListener : BackgroundService
 
     private class DeviceAlertState
     {
-        public bool IgnitionStatus { get; set; }
+        public bool? IgnitionStatus { get; set; }
         public bool IsSpeeding { get; set; }
+        public bool? PowerStatus { get; set; }
+        public bool IsLowBattery { get; set; }
     }
 }
 
@@ -208,4 +284,15 @@ public class LocationNotificationPayload
     public bool IgnitionStatus { get; set; }
     public bool MovementStatus { get; set; }
     public DateTime LastUpdate { get; set; }
+}
+
+public class DeviceStatusNotificationPayload
+{
+    public Guid? VehicleId { get; set; }
+    public Guid? DeviceId { get; set; }
+    public int BatteryLevel { get; set; }
+    public int PowerStatus { get; set; }
+    public bool IgnitionStatus { get; set; }
+    public bool IsOnline { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }
