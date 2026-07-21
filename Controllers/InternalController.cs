@@ -13,10 +13,12 @@ namespace ShaloTrack_API.Controllers;
 public class InternalController : ControllerBase
 {
     private readonly ICustomerService _customerService;
+    private readonly IVehicleService _vehicleService;
 
-    public InternalController(ICustomerService customerService)
+    public InternalController(ICustomerService customerService, IVehicleService vehicleService)
     {
         _customerService = customerService;
+        _vehicleService = vehicleService;
     }
 
     /// <summary>
@@ -28,6 +30,13 @@ public class InternalController : ControllerBase
     public async Task<IActionResult> CustomersSync()
     {
         var response = await _customerService.GetAllAsync();
+        return StatusCode(response.StatusCode, response);
+    }
+
+    [HttpGet("vehicles-sync")]
+    public async Task<IActionResult> VehiclesSync()
+    {
+        var response = await _vehicleService.GetAllAsync();
         return StatusCode(response.StatusCode, response);
     }
 }

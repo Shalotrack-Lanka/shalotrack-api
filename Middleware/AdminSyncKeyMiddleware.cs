@@ -14,7 +14,10 @@ public class AdminSyncKeyMiddleware
 
     public async Task InvokeAsync(HttpContext context, IConfiguration config)
     {
-        if (context.Request.Path.StartsWithSegments("/api/internal/customers-sync"))
+        // FIX: was checking the exact "/api/internal/customers-sync" path only,
+        // which meant /api/internal/vehicles-sync (and any future internal
+        // route) skipped this check entirely and passed through unauthenticated.
+        if (context.Request.Path.StartsWithSegments("/api/internal"))
         {
             var expected = config["AdminSync:Key"];
             var provided = context.Request.Headers["X-Admin-Sync-Key"].ToString();
