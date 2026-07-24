@@ -1,12 +1,12 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ShaloTrack_API.Filters;
+using ShaloTrack_API.Responses;
 using ShaloTrack_API.Services.Interfaces;
+using System.Linq;
 
 namespace ShaloTrack_API.Controllers;
 
-// Deliberately separate from CustomersController — this route is gated by
-// AdminSyncKeyMiddleware instead of Firebase, so it must never share a
-// controller with the customer-facing, [Authorize]-protected endpoints.
 [ApiController]
 [Route("api/internal")]
 [AllowAnonymous]
@@ -14,18 +14,21 @@ public class InternalController : ControllerBase
 {
     private readonly ICustomerService _customerService;
     private readonly IVehicleService _vehicleService;
+    private readonly IGpsTrackingService _gpsTrackingService;
+    private readonly IGpsDeviceService _gpsDeviceService;
 
-    public InternalController(ICustomerService customerService, IVehicleService vehicleService)
+    public InternalController(
+        ICustomerService customerService,
+        IVehicleService vehicleService,
+        IGpsTrackingService gpsTrackingService,
+        IGpsDeviceService gpsDeviceService)
     {
         _customerService = customerService;
         _vehicleService = vehicleService;
+        _gpsTrackingService = gpsTrackingService;
+        _gpsDeviceService = gpsDeviceService;
     }
 
-    /// <summary>
-    /// Interim sync endpoint for the Laravel Admin portal. Gated by
-    /// AdminSyncKeyMiddleware (X-Admin-Sync-Key header), not Firebase.
-    /// TODO: replace with a Firebase service-account token and remove this route.
-    /// </summary>
     [HttpGet("customers-sync")]
     public async Task<IActionResult> CustomersSync()
     {
@@ -37,6 +40,27 @@ public class InternalController : ControllerBase
     public async Task<IActionResult> VehiclesSync()
     {
         var response = await _vehicleService.GetAllAsync();
+        return StatusCode(response.StatusCode, response);
+    }
+
+    [HttpGet("gps-tracking-sync")]
+    public async Task<IActionResult> GpsTrackingSync([FromQuery] GpsTrackingFilter filter, [FromQuery] string? imei)
+    {
+        if (!string.IsNullOrWhiteSpace(imei) && filter.DeviceId is null)
+        {
+            var devicesResponse = await _gpsDeviceService.GetAllAsync();
+            var matched = devicesResponse.Data?.FirstOrDefault(d => d.ImeiNumber == imei);
+
+            if (matched is null)
+            {
+                return StatusCode(404, ApiResponse<string>.Fail(
+                    404, "Device not found.", $"No device exists with IMEI '{imei}'."));
+            }
+
+            filter.DeviceId = matched.DeviceId;
+        }
+
+        var response = await _gpsTrackingService.GetAsync(filter);
         return StatusCode(response.StatusCode, response);
     }
 }
