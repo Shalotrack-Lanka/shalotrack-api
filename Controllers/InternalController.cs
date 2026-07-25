@@ -15,18 +15,15 @@ public class InternalController : ControllerBase
     private readonly ICustomerService _customerService;
     private readonly IVehicleService _vehicleService;
     private readonly IGpsTrackingService _gpsTrackingService;
-    private readonly IGpsDeviceService _gpsDeviceService;
 
     public InternalController(
         ICustomerService customerService,
         IVehicleService vehicleService,
-        IGpsTrackingService gpsTrackingService,
-        IGpsDeviceService gpsDeviceService)
+        IGpsTrackingService gpsTrackingService)
     {
         _customerService = customerService;
         _vehicleService = vehicleService;
         _gpsTrackingService = gpsTrackingService;
-        _gpsDeviceService = gpsDeviceService;
     }
 
     [HttpGet("customers-sync")]
@@ -46,18 +43,18 @@ public class InternalController : ControllerBase
     [HttpGet("gps-tracking-sync")]
     public async Task<IActionResult> GpsTrackingSync([FromQuery] GpsTrackingFilter filter, [FromQuery] string? imei)
     {
-        if (!string.IsNullOrWhiteSpace(imei) && filter.DeviceId is null)
+        if (!string.IsNullOrWhiteSpace(imei) && !filter.VehicleId.HasValue)
         {
-            var devicesResponse = await _gpsDeviceService.GetAllAsync();
-            var matched = devicesResponse.Data?.FirstOrDefault(d => d.ImeiNumber == imei);
+            var vehiclesResponse = await _vehicleService.GetAllAsync();
+            var matched = vehiclesResponse.Data?.FirstOrDefault(v => v.Imei == imei);
 
             if (matched is null)
             {
                 return StatusCode(404, ApiResponse<string>.Fail(
-                    404, "Device not found.", $"No device exists with IMEI '{imei}'."));
+                    404, "Device not found.", $"No vehicle with a linked device matching IMEI '{imei}' was found."));
             }
 
-            filter.DeviceId = matched.DeviceId;
+            filter.VehicleId = matched.VehicleId;
         }
 
         var response = await _gpsTrackingService.GetAsync(filter);

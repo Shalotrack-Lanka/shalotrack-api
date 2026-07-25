@@ -14,9 +14,6 @@ public class AdminSyncKeyMiddleware
 
     public async Task InvokeAsync(HttpContext context, IConfiguration config)
     {
-        // FIX: was checking the exact "/api/internal/customers-sync" path only,
-        // which meant /api/internal/vehicles-sync (and any future internal
-        // route) skipped this check entirely and passed through unauthenticated.
         if (context.Request.Path.StartsWithSegments("/api/internal"))
         {
             var expected = config["AdminSync:Key"];
@@ -32,6 +29,13 @@ public class AdminSyncKeyMiddleware
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;
             }
+
+            // Key check passed — mark this request as a trusted internal caller.
+            // CurrentUser.IsStaff checks this, since there's no Firebase JWT here
+            // at all (that's the whole point of this route) — without this flag,
+            // every internal call falls into the customer-ownership check and
+            // fails it, since there's no authenticated FirebaseUid to compare.
+            context.Items["IsInternalTrustedRequest"] = true;
         }
 
         await _next(context);

@@ -34,6 +34,9 @@ public class CurrentUser : ICurrentUser
     {
         get
         {
+            if (_http.HttpContext?.Items["IsInternalTrustedRequest"] is true)
+                return true;
+
             var user = _http.HttpContext?.User;
             if (user is null) return false;
             return user.IsInRole("Admin") || user.IsInRole("Dealer");
