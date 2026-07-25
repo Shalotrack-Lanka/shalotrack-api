@@ -1,19 +1,24 @@
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder.Extensions;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
-using ShaloTrack_API.Auth;
-using ShaloTrack_API.Extensions;
-using ShaloTrack_API.Middlewares;
-using ShaloTrack_API.Hubs;
-using ShaloTrack_API.Services.Realtime;
-using System.Net;
 using OpenTelemetry.Exporter;
+using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using OpenTelemetry.Logs;
+using ShaloTrack_API.Auth;
+using ShaloTrack_API.Extensions;
+using ShaloTrack_API.Hubs;
+using ShaloTrack_API.Middlewares;
+using ShaloTrack_API.Services.Implementations;
+using ShaloTrack_API.Services.Interfaces;
+using ShaloTrack_API.Services.Realtime;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -77,6 +82,20 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 // ---- REAL-TIME PUSH (Option B) ----
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<LocationNotificationListener>();
+
+// ---- FCM PUSH (NEW) ----
+var firebaseServiceAccountJson = builder.Configuration["Firebase:ServiceAccountJson"]
+    ?? throw new InvalidOperationException(
+        "Firebase:ServiceAccountJson is not configured. This must be the full " +
+        "service account JSON key content, injected via the Firebase__ServiceAccountJson " +
+        "environment variable (sourced from AWS SSM -- see SETUP_PART1_CREDENTIALS.md).");
+
+FirebaseApp.Create(new AppOptions
+{
+    Credential = GoogleCredential.FromJson(firebaseServiceAccountJson)
+});
+
+builder.Services.AddScoped<IPushNotificationService, PushNotificationService>();
 
 // ---- OBSERVABILITY (OTel -> SRE stack) ----
 var otelBase = "http://otel.shalotrack.internal:4318";

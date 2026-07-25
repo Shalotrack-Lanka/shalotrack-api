@@ -7,6 +7,7 @@ using ShaloTrack_API.Enums;
 using ShaloTrack_API.Hubs;
 using ShaloTrack_API.Models;
 using ShaloTrack_API.Repositories.Interfaces;
+using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Services.Realtime;
 
@@ -244,6 +245,26 @@ public class LocationNotificationListener : BackgroundService
         await unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Created {Count} alert(s) for vehicle {VehicleId}", alerts.Count, vehicleId);
+
+        // NEW -- send a push for each alert just created. Resolves the vehicle's
+        // owning customer once, reuses it for every alert in this batch (there's
+        // usually only one, but a single notification can occasionally carry
+        // more than one alert-worthy change at once).
+        var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+        if (vehicle is null)
+        {
+            _logger.LogWarning("Could not resolve customer for vehicle {VehicleId}, skipping push.", vehicleId);
+            return;
+        }
+
+        var pushService = scope.ServiceProvider.GetRequiredService<IPushNotificationService>();
+        foreach (var alert in alerts)
+        {
+            await pushService.SendAlertPushAsync(
+                vehicle.CustomerId,
+                $"{vehicle.VehicleNumber}: {alert.AlertType}",
+                alert.Message);
+        }
     }
 
     private static Alert BuildAlert(
