@@ -18,6 +18,8 @@ public class VehicleRepository : IVehicleRepository
     {
         return await _context.Vehicles
             .Include(v => v.Customer)
+            .Include(v => v.DeviceAssignments)   // FIX: was missing — HasGpsDevice/Imei
+            .ThenInclude(a => a.Device)          // were silently always false/null here
             .AsNoTracking()
             .OrderBy(v => v.VehicleNumber)
             .ToListAsync();
