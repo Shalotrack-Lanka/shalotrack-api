@@ -43,6 +43,12 @@ public class InternalController : ControllerBase
     [HttpGet("gps-tracking-sync")]
     public async Task<IActionResult> GpsTrackingSync([FromQuery] GpsTrackingFilter filter, [FromQuery] string? imei)
     {
+        // FIX: HTML datetime-local inputs parse as Kind=Unspecified, but Npgsql
+        // requires Kind=Utc for "timestamp with time zone" columns — crashes
+        // with a 500 the moment From/To are actually supplied.
+        if (filter.From.HasValue) filter.From = DateTime.SpecifyKind(filter.From.Value, DateTimeKind.Utc);
+        if (filter.To.HasValue) filter.To = DateTime.SpecifyKind(filter.To.Value, DateTimeKind.Utc);
+
         var vehiclesResponse = await _vehicleService.GetAllAsync();
 
         if (!string.IsNullOrWhiteSpace(imei) && !filter.VehicleId.HasValue)
