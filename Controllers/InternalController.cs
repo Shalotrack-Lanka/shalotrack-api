@@ -43,21 +43,33 @@ public class InternalController : ControllerBase
     [HttpGet("gps-tracking-sync")]
     public async Task<IActionResult> GpsTrackingSync([FromQuery] GpsTrackingFilter filter, [FromQuery] string? imei)
     {
+        var vehiclesResponse = await _vehicleService.GetAllAsync();
+
         if (!string.IsNullOrWhiteSpace(imei) && !filter.VehicleId.HasValue)
         {
-            var vehiclesResponse = await _vehicleService.GetAllAsync();
-            var matched = vehiclesResponse.Data?.FirstOrDefault(v => v.Imei == imei);
-
-            if (matched is null)
+            var matchedByImei = vehiclesResponse.Data?.FirstOrDefault(v => v.Imei == imei);
+            if (matchedByImei is null)
             {
                 return StatusCode(404, ApiResponse<string>.Fail(
                     404, "Device not found.", $"No vehicle with a linked device matching IMEI '{imei}' was found."));
             }
-
-            filter.VehicleId = matched.VehicleId;
+            filter.VehicleId = matchedByImei.VehicleId;
         }
 
-        var response = await _gpsTrackingService.GetAsync(filter);
-        return StatusCode(response.StatusCode, response);
+        if (!filter.VehicleId.HasValue)
+        {
+            return StatusCode(400, ApiResponse<string>.Fail(400, "Vehicle ID or IMEI is required."));
+        }
+
+        var vehicle = vehiclesResponse.Data?.FirstOrDefault(v => v.VehicleId == filter.VehicleId.Value);
+        var trackingResponse = await _gpsTrackingService.GetAsync(filter);
+
+        return Ok(new
+        {
+            statusCode = 200,
+            vehicle,
+            currentLocation = trackingResponse.Data?.FirstOrDefault(), // most recent point — history is newest-first
+            trackingHistory = trackingResponse.Data,
+        });
     }
 }
