@@ -17,6 +17,13 @@ public class Vehicle
     public string? Color { get; set; }
     public string? VehicleType { get; set; }
     public string? FuelType { get; set; }
+
+    // NEW -- soft delete flag. Removing a vehicle now sets this to false
+    // instead of deleting the row outright, preserving GpsTrackings/Alerts
+    // history that reference this vehicle by foreign key. Defaults true so
+    // every existing row remains visible after the migration runs.
+    public bool IsActive { get; set; } = true;
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public Customer Customer { get; set; } = null!;

@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using ShaloTrack_API.DTOs.Vehicle;
+using ShaloTrack_API.Enums;
 using ShaloTrack_API.Models;
 using ShaloTrack_API.Repositories.Interfaces;
 using ShaloTrack_API.Responses;
@@ -71,7 +72,7 @@ public class VehicleService : IVehicleService
              !string.Equals(customer.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal)))
         {
             return ApiResponse<IReadOnlyList<VehicleResponseDto>>.Fail(
-                (int)HttpStatusCode.NotFound, 
+                (int)HttpStatusCode.NotFound,
                 "Customer not found.",
                 "The specified customer does not exist.");
         }
@@ -145,6 +146,7 @@ public class VehicleService : IVehicleService
             Color = dto.Color,
             VehicleType = dto.VehicleType,
             FuelType = dto.FuelType,
+            IsActive = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -253,14 +255,61 @@ public class VehicleService : IVehicleService
             );
         }
 
-        _unitOfWork.Vehicles.Delete(vehicle);
+        if (!vehicle.IsActive)
+        {
+            return ApiResponse<string>.Fail(
+                (int)HttpStatusCode.BadRequest,
+                "Already removed.",
+                "This vehicle has already been removed."
+            );
+        }
 
-        await _unitOfWork.SaveChangesAsync();
+        // FIX: this used to hard-delete the vehicle row outright
+        // (_unitOfWork.Vehicles.Delete(vehicle) + SaveChangesAsync), which
+        // would either violate foreign key constraints from GpsTrackings/
+        // Alerts/CurrentLocations/DeviceAssignments, or silently cascade-
+        // delete all of a customer's trip and alert history along with it --
+        // neither of which is acceptable. This now soft-deletes the vehicle
+        // (IsActive = false, so it disappears from the owner's vehicle list
+        // via VehicleRepository.GetByCustomerAsync's filter, while all
+        // historical data referencing it stays intact) AND, in the same
+        // transaction, unassigns its GPS device -- freeing that IMEI so it
+        // can be linked to a new vehicle, by the same or a different
+        // customer (e.g. after a vehicle sale), reusing the exact same
+        // unassign logic as DeviceAssignmentService.UnassignAsync().
+        try
+        {
+            await _unitOfWork.BeginTransactionAsync();
 
-        return ApiResponse<string>.Ok(
-            "Vehicle deleted successfully.",
-            "Vehicle deleted successfully."
-        );
+            vehicle.IsActive = false;
+            vehicle.UpdatedAt = DateTime.UtcNow;
+            _unitOfWork.Vehicles.Update(vehicle);
+
+            var activeAssignment =
+                (await _unitOfWork.DeviceAssignments.GetByVehicleAsync(vehicleId, true))
+                .FirstOrDefault();
+
+            if (activeAssignment != null)
+            {
+                activeAssignment.Status = AssignmentStatus.Removed;
+                activeAssignment.RemovedAt = DateTime.UtcNow;
+                _unitOfWork.DeviceAssignments.Update(activeAssignment);
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+
+            await _unitOfWork.CommitTransactionAsync();
+
+            return ApiResponse<string>.Ok(
+                "Vehicle removed successfully.",
+                "Vehicle removed successfully."
+            );
+        }
+        catch
+        {
+            await _unitOfWork.RollbackTransactionAsync();
+            throw;
+        }
     }
 
     private static VehicleResponseDto ToDto(Vehicle vehicle)
