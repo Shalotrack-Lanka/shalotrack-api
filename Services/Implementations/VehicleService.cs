@@ -277,6 +277,15 @@ public class VehicleService : IVehicleService
         // can be linked to a new vehicle, by the same or a different
         // customer (e.g. after a vehicle sale), reusing the exact same
         // unassign logic as DeviceAssignmentService.UnassignAsync().
+        // FIX: this previously called _unitOfWork.DeviceAssignments.GetByVehicleAsync()
+        // as a separate query, which loaded a SECOND, different instance of the
+        // same DeviceAssignment row that GetByIdAsync() above had already loaded
+        // (untracked) via vehicle.DeviceAssignments. Calling .Update() on that
+        // second instance conflicted with EF Core already tracking the first one
+        // -- confirmed via a real test that threw exactly this exception. Using
+        // the assignment already present on the loaded vehicle object avoids the
+        // duplicate-instance conflict entirely, and no .Update() call is needed
+        // at all -- EF Core auto-detects changes to entities it's already tracking.
         try
         {
             await _unitOfWork.BeginTransactionAsync();
@@ -285,15 +294,13 @@ public class VehicleService : IVehicleService
             vehicle.UpdatedAt = DateTime.UtcNow;
             _unitOfWork.Vehicles.Update(vehicle);
 
-            var activeAssignment =
-                (await _unitOfWork.DeviceAssignments.GetByVehicleAsync(vehicleId, true))
-                .FirstOrDefault();
+            var activeAssignment = vehicle.DeviceAssignments
+                .FirstOrDefault(a => a.Status == AssignmentStatus.Active);
 
             if (activeAssignment != null)
             {
                 activeAssignment.Status = AssignmentStatus.Removed;
                 activeAssignment.RemovedAt = DateTime.UtcNow;
-                _unitOfWork.DeviceAssignments.Update(activeAssignment);
             }
 
             await _unitOfWork.SaveChangesAsync();
