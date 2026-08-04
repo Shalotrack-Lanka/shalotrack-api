@@ -12,11 +12,14 @@ namespace ShaloTrack_API.Controllers;
 public class VehiclesController : ControllerBase
 {
     private readonly IVehicleService _vehicleService;
+    private readonly IRoadSnappingService _roadSnappingService;
 
     public VehiclesController(
-        IVehicleService vehicleService)
+        IVehicleService vehicleService,
+        IRoadSnappingService roadSnappingService)
     {
         _vehicleService = vehicleService;
+        _roadSnappingService = roadSnappingService;
     }
 
     /// <summary>
@@ -89,6 +92,22 @@ public class VehiclesController : ControllerBase
     public async Task<IActionResult> Delete(Guid vehicleId)
     {
         var response = await _vehicleService.DeleteAsync(vehicleId);
+
+        return StatusCode(response.StatusCode, response);
+    }
+
+    /// <summary>
+    /// Snaps a batch of raw GPS points onto the actual road network for this
+    /// vehicle's live trail rendering. Ownership is enforced in the service
+    /// (same pattern as GetById/Update/Delete above). Max 100 points per
+    /// call (Google Roads API's own limit).
+    /// </summary>
+    [HttpPost("{vehicleId:guid}/snap-to-road")]
+    public async Task<IActionResult> SnapToRoad(
+        Guid vehicleId,
+        [FromBody] SnapToRoadRequestDto request)
+    {
+        var response = await _roadSnappingService.SnapToRoadAsync(vehicleId, request);
 
         return StatusCode(response.StatusCode, response);
     }

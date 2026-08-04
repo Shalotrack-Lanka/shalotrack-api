@@ -97,6 +97,23 @@ FirebaseApp.Create(new AppOptions
 
 builder.Services.AddScoped<IPushNotificationService, PushNotificationService>();
 
+// ---- ROAD SNAPPING (NEW) ----
+// Fail-fast at startup, matching the Firebase:ServiceAccountJson pattern
+// above -- a missing key should crash the app at boot, not surface as a
+// silent 500 on the first live snap-to-road request. Deliberately a
+// SEPARATE key from the Android app's own Maps SDK key: that one is
+// Android-app-restricted and rejects these server-side calls, and this
+// key must never be sent to the Android app at all regardless.
+_ = builder.Configuration["GoogleMaps:RoadsApiKey"]
+    ?? throw new InvalidOperationException(
+        "GoogleMaps:RoadsApiKey is not configured. Must be injected via the " +
+        "GoogleMaps__RoadsApiKey environment variable, sourced from AWS SSM.");
+
+builder.Services.AddHttpClient("GoogleRoadsApi", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+
 // ---- OBSERVABILITY (OTel -> SRE stack) ----
 var otelBase = "http://otel.shalotrack.internal:4318";
 

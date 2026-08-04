@@ -19,6 +19,7 @@ public static class BusinessServiceExtensions
         services.AddScoped<IDeviceEventService, DeviceEventService>();
         services.AddScoped<IAlertService, AlertService>();   // NEW
         services.AddScoped<ICurrentUser, CurrentUser>();
+        services.AddScoped<IRoadSnappingService, RoadSnappingService>();   // NEW -- live trail road-snapping jumps back to the 
         return services;
     }
 }
