@@ -37,6 +37,15 @@ namespace ShaloTrack_API.Services.Realtime;
 /// saw). This is what makes IgnitionOff detection safe to depend on for
 /// anything that matters -- e.g. the trip-archival trigger (Phase 3).
 ///
+/// Seeding reads via IDeviceStatusRepository directly (NOT IUnitOfWork) --
+/// deliberately. Every other read of DeviceStatuses in this codebase already
+/// goes through IDeviceStatusRepository directly, never through IUnitOfWork;
+/// an earlier version of this method went through IUnitOfWork.DeviceStatuses
+/// instead, which is null in the actual DI-registered UnitOfWork and took
+/// this entire listener down in production (NullReferenceException on every
+/// connection attempt, LISTEN never once succeeded). Do not change this back
+/// without confirming IUnitOfWork.DeviceStatuses is actually populated first.
+///
 /// KNOWN REMAINING GAP: IsSpeeding is not seeded, since DeviceStatuses carries
 /// no speed field -- only location_updates does. A missed overspeed alert
 /// across a restart/reconnect is still possible. Low severity, not addressed
@@ -84,7 +93,7 @@ public class LocationNotificationListener : BackgroundService
                 // right after connect can race against a half-seeded cache.
                 // Runs on first startup AND on every reconnect -- see class
                 // summary for why the reconnect case matters just as much.
-                await SeedDeviceStatesFromDatabaseAsync(stoppingToken);
+                await SeedDeviceStatesFromDatabaseAsync();
 
                 connection.Notification += async (sender, args) =>
                 {
@@ -136,17 +145,14 @@ public class LocationNotificationListener : BackgroundService
 
     // ---- state seeding (startup + every reconnect) ----
 
-    private async Task SeedDeviceStatesFromDatabaseAsync(CancellationToken stoppingToken)
+    private async Task SeedDeviceStatesFromDatabaseAsync()
     {
         using var scope = _scopeFactory.CreateScope();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
-        // ASSUMPTION TO VERIFY: this assumes IUnitOfWork exposes a
-        // .DeviceStatuses property backed by IDeviceStatusRepository, mirroring
-        // .Alerts / .Vehicles already used elsewhere in this file. If the real
-        // interface names it differently, adjust this one line accordingly --
-        // nothing else in this method depends on the name.
-        var statuses = await unitOfWork.DeviceStatuses.GetAllAsync();
+        // Goes through IDeviceStatusRepository directly -- see class summary
+        // for why this is NOT IUnitOfWork.DeviceStatuses.
+        var deviceStatusRepository = scope.ServiceProvider.GetRequiredService<IDeviceStatusRepository>();
+        var statuses = await deviceStatusRepository.GetAllAsync();
 
         foreach (var status in statuses)
         {
