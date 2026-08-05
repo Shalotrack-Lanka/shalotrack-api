@@ -24,6 +24,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<DeviceEvent> DeviceEvents => Set<DeviceEvent>();
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<CustomerFcmToken> CustomerFcmTokens => Set<CustomerFcmToken>();
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();   // NEW
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -75,7 +76,7 @@ public class ShaloTrackDbContext : DbContext
         modelBuilder.Entity<DeviceEvent>()
             .HasOne(e => e.Device)
             .WithMany(d => d.DeviceEvents)
-            .HasForeignKey(e => e.DeviceId);    
+            .HasForeignKey(e => e.DeviceId);
 
         modelBuilder.Entity<DeviceEvent>()
             .HasOne(e => e.Vehicle)
@@ -90,5 +91,11 @@ public class ShaloTrackDbContext : DbContext
         modelBuilder.Entity<CustomerFcmToken>()
             .HasIndex(t => t.FcmToken)
             .IsUnique();
+
+        // NEW
+        modelBuilder.Entity<Subscription>()
+            .HasOne(s => s.Customer)
+            .WithMany()
+            .HasForeignKey(s => s.CustomerId);
     }
 }

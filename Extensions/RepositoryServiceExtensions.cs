@@ -19,6 +19,7 @@ public static class RepositoryServiceExtensions
         services.AddScoped<IDeviceEventRepository, DeviceEventRepository>();
         services.AddScoped<IAlertRepository, AlertRepository>();                        // NEW
         services.AddScoped<ICustomerFcmTokenRepository, CustomerFcmTokenRepository>();  // NEW
+        services.AddScoped<ISubscriptionRepository, SubscriptionRepository>();          // NEW
 
         // Unit of Work
         services.AddScoped<IUnitOfWork, UnitOfWork>();

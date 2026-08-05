@@ -8,6 +8,7 @@ public interface IUnitOfWork
     IDeviceAssignmentRepository DeviceAssignments { get; }
     IAlertRepository Alerts { get; }                        // NEW
     ICustomerFcmTokenRepository FcmTokens { get; }           // NEW
+    ISubscriptionRepository Subscriptions { get; }           // NEW
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();
