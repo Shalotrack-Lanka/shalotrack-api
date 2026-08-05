@@ -144,26 +144,44 @@ public class TripArchivalService : ITripArchivalService
 
         if (ignitionOnAlert is not null)
         {
-            // FIX (post Phase 3a manual test on WP CAD 9934): a candidate
-            // IgnitionOn is only valid as this trip's start if nothing closed
-            // it in between. Without this check, a stale IgnitionOn from days
-            // or weeks earlier gets paired with today's IgnitionOff, producing
-            // a bogus multi-day "trip" -- exactly what happened in that test
-            // (July 29 IgnitionOn paired with an Aug 5 test IgnitionOff,
-            // sweeping five days of idle parked pings into one archive).
-            var hasInterveningIgnitionOff = await _unitOfWork.Alerts.ExistsByDeviceAndTypeBetweenAsync(
-                deviceId, AlertType.IgnitionOff, ignitionOnAlert.TriggeredAt, tripEndTime);
+            var candidateAge = tripEndTime - ignitionOnAlert.TriggeredAt;
 
-            if (!hasInterveningIgnitionOff)
+            // FIX #2 (post re-test on WP CAD 9934): the intervening-IgnitionOff
+            // check alone isn't enough. A device that goes permanently dark
+            // (dead battery, lost SIM, physically disconnected) without ever
+            // reporting an IgnitionOff looks IDENTICAL to a legitimately still-
+            // open trip from this query's point of view -- "no intervening
+            // close-out" is true in both cases. This age ceiling is the real
+            // primary guard; the intervening-alert check below is an
+            // additional guard on top of it, not a substitute for it.
+            if (candidateAge <= FallbackMaxTripDuration)
             {
-                return ignitionOnAlert.TriggeredAt;
-            }
+                // FIX #1 (post Phase 3a manual test on WP CAD 9934): a candidate
+                // IgnitionOn is only valid as this trip's start if nothing closed
+                // it in between. Without this, a stale IgnitionOn gets paired
+                // with today's IgnitionOff, producing a bogus multi-day "trip".
+                var hasInterveningIgnitionOff = await _unitOfWork.Alerts.ExistsByDeviceAndTypeBetweenAsync(
+                    deviceId, AlertType.IgnitionOff, ignitionOnAlert.TriggeredAt, tripEndTime);
 
-            _logger.LogWarning(
-                "TripArchivalService: candidate IgnitionOn at {IgnitionOn} for device {DeviceId} was already " +
-                "closed by an intervening IgnitionOff before {TripEnd} -- falling back to the {Hours}h safety " +
-                "cap instead of reaching back past it.",
-                ignitionOnAlert.TriggeredAt, deviceId, tripEndTime, FallbackMaxTripDuration.TotalHours);
+                if (!hasInterveningIgnitionOff)
+                {
+                    return ignitionOnAlert.TriggeredAt;
+                }
+
+                _logger.LogWarning(
+                    "TripArchivalService: candidate IgnitionOn at {IgnitionOn} for device {DeviceId} was already " +
+                    "closed by an intervening IgnitionOff before {TripEnd} -- falling back to the {Hours}h safety " +
+                    "cap instead of reaching back past it.",
+                    ignitionOnAlert.TriggeredAt, deviceId, tripEndTime, FallbackMaxTripDuration.TotalHours);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "TripArchivalService: candidate IgnitionOn at {IgnitionOn} for device {DeviceId} is {AgeHours:F1}h " +
+                    "old -- beyond the {CapHours}h safety cap regardless of whether an IgnitionOff exists in between " +
+                    "(device may have gone dark without ever reporting one). Falling back to the safety cap.",
+                    ignitionOnAlert.TriggeredAt, deviceId, candidateAge.TotalHours, FallbackMaxTripDuration.TotalHours);
+            }
         }
         else
         {
