@@ -19,6 +19,8 @@ public class UnitOfWork : IUnitOfWork
     public ICustomerFcmTokenRepository FcmTokens { get; }         // NEW
     public ISubscriptionRepository Subscriptions { get; }         // NEW
 
+    public IDeviceStatusRepository DeviceStatuses { get; }
+
     public UnitOfWork(
         ShaloTrackDbContext context,
         ICustomerRepository customerRepository,
