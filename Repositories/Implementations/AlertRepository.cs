@@ -48,4 +48,14 @@ public class AlertRepository : IAlertRepository
             .OrderByDescending(a => a.TriggeredAt)
             .FirstOrDefaultAsync();
     }
+
+    public async Task<bool> ExistsByDeviceAndTypeBetweenAsync(Guid deviceId, AlertType alertType, DateTime after, DateTime before)
+    {
+        return await _context.Alerts
+            .AsNoTracking()
+            .AnyAsync(a => a.DeviceId == deviceId
+                && a.AlertType == alertType
+                && a.TriggeredAt > after
+                && a.TriggeredAt < before);
+    }
 }

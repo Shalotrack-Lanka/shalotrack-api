@@ -9,7 +9,17 @@ namespace ShaloTrack_API.Services.Implementations;
 
 public class TripArchivalService : ITripArchivalService
 {
+    // Matches the Python gateway's tuned movement threshold (tracking_service.py) --
+    // duplicated here deliberately, since the two are different languages/repos and
+    // can't share a literal constant. If that threshold is ever retuned, this needs
+    // updating too -- nothing enforces the two staying in sync.
     private const decimal MovingSpeedThresholdKmh = 7m;
+
+    // Defensive cap for when no valid prior IgnitionOn can be resolved (first-ever
+    // trip, alert history lost before the Phase 2 fix shipped, or the only
+    // candidate IgnitionOn was already closed by an intervening IgnitionOff --
+    // see ResolveTripStartAsync). 24h is a safety ceiling, not a real trip
+    // boundary in this fallback case.
     private static readonly TimeSpan FallbackMaxTripDuration = TimeSpan.FromHours(24);
 
     private readonly IGpsTrackingRepository _gpsTrackingRepository;
@@ -26,7 +36,15 @@ public class TripArchivalService : ITripArchivalService
         ILogger<TripArchivalService> logger)
     {
         _gpsTrackingRepository = gpsTrackingRepository;
+
+        // Alerts goes through IUnitOfWork -- it's actually wired in there.
+        // GpsTrackings is NOT wired into IUnitOfWork, so that one is injected
+        // directly instead. This split looks inconsistent; it is deliberate --
+        // see the Phase 2/3a postmortems for what happens when that's assumed
+        // without checking (IUnitOfWork.DeviceStatuses was declared but never
+        // wired either, and stayed broken until something finally called it).
         _unitOfWork = unitOfWork;
+
         _s3Client = s3Client;
         _logger = logger;
 
@@ -60,6 +78,9 @@ public class TripArchivalService : ITripArchivalService
             geometry = new
             {
                 type = "Point",
+                // GeoJSON coordinate order is [longitude, latitude] -- checked
+                // deliberately, not assumed. Confirmed correct against real
+                // Colombo-area coordinates during Phase 3a testing.
                 coordinates = new[] { (double)p.Longitude, (double)p.Latitude }
             },
             properties = new
@@ -123,13 +144,34 @@ public class TripArchivalService : ITripArchivalService
 
         if (ignitionOnAlert is not null)
         {
-            return ignitionOnAlert.TriggeredAt;
-        }
+            // FIX (post Phase 3a manual test on WP CAD 9934): a candidate
+            // IgnitionOn is only valid as this trip's start if nothing closed
+            // it in between. Without this check, a stale IgnitionOn from days
+            // or weeks earlier gets paired with today's IgnitionOff, producing
+            // a bogus multi-day "trip" -- exactly what happened in that test
+            // (July 29 IgnitionOn paired with an Aug 5 test IgnitionOff,
+            // sweeping five days of idle parked pings into one archive).
+            var hasInterveningIgnitionOff = await _unitOfWork.Alerts.ExistsByDeviceAndTypeBetweenAsync(
+                deviceId, AlertType.IgnitionOff, ignitionOnAlert.TriggeredAt, tripEndTime);
 
-        _logger.LogWarning(
-            "TripArchivalService: no prior IgnitionOn alert found for device {DeviceId} before {TripEnd} -- " +
-            "falling back to a {Hours}h safety cap instead of pulling unbounded history.",
-            deviceId, tripEndTime, FallbackMaxTripDuration.TotalHours);
+            if (!hasInterveningIgnitionOff)
+            {
+                return ignitionOnAlert.TriggeredAt;
+            }
+
+            _logger.LogWarning(
+                "TripArchivalService: candidate IgnitionOn at {IgnitionOn} for device {DeviceId} was already " +
+                "closed by an intervening IgnitionOff before {TripEnd} -- falling back to the {Hours}h safety " +
+                "cap instead of reaching back past it.",
+                ignitionOnAlert.TriggeredAt, deviceId, tripEndTime, FallbackMaxTripDuration.TotalHours);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "TripArchivalService: no prior IgnitionOn alert found for device {DeviceId} before {TripEnd} -- " +
+                "falling back to a {Hours}h safety cap instead of pulling unbounded history.",
+                deviceId, tripEndTime, FallbackMaxTripDuration.TotalHours);
+        }
 
         return tripEndTime - FallbackMaxTripDuration;
     }
