@@ -85,4 +85,22 @@ public class GpsTrackingRepository : IGpsTrackingRepository
             })
             .ToListAsync();
     }
+
+    // NEW -- Phase 3b
+    public async Task<int> CountByDeviceInRangeAsync(Guid deviceId, DateTime from, DateTime to)
+    {
+        return await _context.GpsTrackings
+            .Where(x => x.DeviceId == deviceId && x.EventTime >= from && x.EventTime <= to)
+            .CountAsync();
+    }
+
+    // NEW -- Phase 3b. ExecuteDeleteAsync issues a single SQL DELETE server-side
+    // -- does not load rows into memory first, correct choice for a table that
+    // can hold thousands of rows for even a short trip window.
+    public async Task<int> DeleteByDeviceInRangeAsync(Guid deviceId, DateTime from, DateTime to)
+    {
+        return await _context.GpsTrackings
+            .Where(x => x.DeviceId == deviceId && x.EventTime >= from && x.EventTime <= to)
+            .ExecuteDeleteAsync();
+    }
 }

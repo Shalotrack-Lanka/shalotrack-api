@@ -20,6 +20,7 @@ public static class RepositoryServiceExtensions
         services.AddScoped<IAlertRepository, AlertRepository>();                        // NEW
         services.AddScoped<ICustomerFcmTokenRepository, CustomerFcmTokenRepository>();  // NEW
         services.AddScoped<ISubscriptionRepository, SubscriptionRepository>();          // NEW
+        services.AddScoped<IRawPacketRepository, RawPacketRepository>();                // NEW -- Phase 3b
 
         // Unit of Work
         services.AddScoped<IUnitOfWork, UnitOfWork>();

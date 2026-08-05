@@ -27,11 +27,20 @@ builder.Services.AddDatabaseServices(builder.Configuration);
 builder.Services.AddRepositoryServices();
 builder.Services.AddBusinessServices();
 
-// ---- GPS TRIP ARCHIVAL (NEW -- Phase 3a) ----
-// S3 write only, no delete permission granted at the IAM level. Not wired
-// into LocationNotificationListener yet -- inert until Phase 3b calls it.
+// ---- GPS TRIP ARCHIVAL (Phase 3a) ----
+// S3 write only, no delete permission granted at the IAM level.
 builder.Services.AddAwsServices();
 builder.Services.AddScoped<ITripArchivalService, TripArchivalService>();
+
+// ---- GPS TRIP ARCHIVAL -- ARCHIVE-THEN-PURGE PIPELINE (NEW -- Phase 3b) ----
+// Queue is a singleton (one instance shared for the whole app's lifetime,
+// bridging the NOTIFY handler thread and the background worker). The purge
+// service and its worker are scoped/hosted respectively -- see
+// TripArchivalQueueWorker and TripPurgeService for why each item gets its
+// own DI scope.
+builder.Services.AddSingleton<ITripCloseEventQueue, TripCloseEventQueue>();
+builder.Services.AddScoped<ITripPurgeService, TripPurgeService>();
+builder.Services.AddHostedService<TripArchivalQueueWorker>();
 
 // ASP.NET Core
 builder.Services.AddControllers();

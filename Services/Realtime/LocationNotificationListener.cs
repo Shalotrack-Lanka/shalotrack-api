@@ -34,29 +34,30 @@ namespace ShaloTrack_API.Services.Realtime;
 /// first LISTEN and again after every reconnect (not just on process restart --
 /// a transient connection drop has the exact same blind spot, since any
 /// DeviceStatuses update during the gap never fires a NOTIFY this listener
-/// saw). This is what makes IgnitionOff detection safe to depend on for
-/// anything that matters -- e.g. the trip-archival trigger (Phase 3).
+/// saw). Seeding reads via IDeviceStatusRepository directly, NOT IUnitOfWork --
+/// see Phase 2 postmortem for why (IUnitOfWork.DeviceStatuses was declared but
+/// never wired, null at runtime, took the whole listener down until fixed).
 ///
-/// Seeding reads via IDeviceStatusRepository directly (NOT IUnitOfWork) --
-/// deliberately. Every other read of DeviceStatuses in this codebase already
-/// goes through IDeviceStatusRepository directly, never through IUnitOfWork;
-/// an earlier version of this method went through IUnitOfWork.DeviceStatuses
-/// instead, which is null in the actual DI-registered UnitOfWork and took
-/// this entire listener down in production (NullReferenceException on every
-/// connection attempt, LISTEN never once succeeded). Do not change this back
-/// without confirming IUnitOfWork.DeviceStatuses is actually populated first.
+/// Trip archival (Phase 3b): the moment IgnitionOff is detected -- from
+/// EITHER detection path below, not just one -- a TripCloseEvent is enqueued
+/// to ITripCloseEventQueue. Both CheckLocationAlertsAsync and
+/// CheckDeviceStatusAlertsAsync enqueue on this transition, because whichever
+/// one happens to observe the change first is the one that will see
+/// state.IgnitionStatus differ; the other arrives after and correctly sees no
+/// change. Wiring only one path would silently miss every trip whose closing
+/// transition happened to be detected via the other one first.
 ///
 /// KNOWN REMAINING GAP: IsSpeeding is not seeded, since DeviceStatuses carries
 /// no speed field -- only location_updates does. A missed overspeed alert
 /// across a restart/reconnect is still possible. Low severity, not addressed
-/// here; revisit only if overspeed alerting needs the same guarantee ignition
-/// detection now has.
+/// here.
 /// </summary>
 public class LocationNotificationListener : BackgroundService
 {
     private readonly string _connectionString;
     private readonly IHubContext<LocationHub> _hubContext;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ITripCloseEventQueue _tripCloseEventQueue; // NEW -- Phase 3b
     private readonly ILogger<LocationNotificationListener> _logger;
 
     private const decimal OverspeedThresholdKmh = 80m;
@@ -68,6 +69,7 @@ public class LocationNotificationListener : BackgroundService
         IConfiguration configuration,
         IHubContext<LocationHub> hubContext,
         IServiceScopeFactory scopeFactory,
+        ITripCloseEventQueue tripCloseEventQueue, // NEW
         ILogger<LocationNotificationListener> logger)
     {
         _connectionString = configuration.GetConnectionString("RealtimeConnection")
@@ -76,6 +78,7 @@ public class LocationNotificationListener : BackgroundService
                 "It must point to the Supabase SESSION pooler (port 5432).");
         _hubContext = hubContext;
         _scopeFactory = scopeFactory;
+        _tripCloseEventQueue = tripCloseEventQueue; // NEW
         _logger = logger;
     }
 
@@ -91,8 +94,7 @@ public class LocationNotificationListener : BackgroundService
                 // Rebuild in-memory state from the DB BEFORE registering the
                 // notification handler or issuing LISTEN, so nothing arriving
                 // right after connect can race against a half-seeded cache.
-                // Runs on first startup AND on every reconnect -- see class
-                // summary for why the reconnect case matters just as much.
+                // Runs on first startup AND on every reconnect.
                 await SeedDeviceStatesFromDatabaseAsync();
 
                 connection.Notification += async (sender, args) =>
@@ -149,8 +151,6 @@ public class LocationNotificationListener : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
 
-        // Goes through IDeviceStatusRepository directly -- see class summary
-        // for why this is NOT IUnitOfWork.DeviceStatuses.
         var deviceStatusRepository = scope.ServiceProvider.GetRequiredService<IDeviceStatusRepository>();
         var statuses = await deviceStatusRepository.GetAllAsync();
 
@@ -161,7 +161,7 @@ public class LocationNotificationListener : BackgroundService
             lock (state)
             {
                 state.IgnitionStatus = status.IgnitionStatus;
-                state.PowerStatus = (int)status.PowerStatus == 1; // 1 = Disconnected, matches DeviceStatusNotificationPayload.PowerStatus
+                state.PowerStatus = (int)status.PowerStatus == 1;
                 state.IsLowBattery = status.BatteryLevel < LowBatteryThresholdPercent;
             }
         }
@@ -197,6 +197,7 @@ public class LocationNotificationListener : BackgroundService
         var state = _deviceStates.GetOrAdd(deviceId, _ => new DeviceAlertState());
 
         var alertsToCreate = new List<Alert>();
+        var tripJustClosed = false; // NEW
 
         lock (state)
         {
@@ -206,6 +207,14 @@ public class LocationNotificationListener : BackgroundService
                     data.VehicleId!.Value, data.DeviceId, data.Latitude, data.Longitude,
                     data.IgnitionStatus ? AlertType.IgnitionOn : AlertType.IgnitionOff,
                     data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off"));
+
+                // NEW -- Phase 3b: trip close detected via the location_updates
+                // path. See class summary for why this mirrors the same check
+                // in CheckDeviceStatusAlertsAsync rather than relying on only one.
+                if (!data.IgnitionStatus)
+                {
+                    tripJustClosed = true;
+                }
             }
             state.IgnitionStatus = data.IgnitionStatus;
 
@@ -218,6 +227,11 @@ public class LocationNotificationListener : BackgroundService
                     $"Speed exceeded {OverspeedThresholdKmh} km/h (reached {data.Speed:F0} km/h)"));
             }
             state.IsSpeeding = isSpeeding;
+        }
+
+        if (tripJustClosed)
+        {
+            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, DateTime.UtcNow));
         }
 
         if (alertsToCreate.Count > 0)
@@ -245,6 +259,7 @@ public class LocationNotificationListener : BackgroundService
         var state = _deviceStates.GetOrAdd(deviceId, _ => new DeviceAlertState());
 
         var alertsToCreate = new List<Alert>();
+        var tripJustClosed = false; // NEW
 
         lock (state)
         {
@@ -255,11 +270,13 @@ public class LocationNotificationListener : BackgroundService
                     data.IgnitionStatus ? AlertType.IgnitionOn : AlertType.IgnitionOff,
                     data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off"));
 
-                // TODO (Phase 3): this is where the trip-archival trigger hooks
-                // in. When data.IgnitionStatus == false (trip just closed),
-                // this is the exact, single point where that's known -- queue
-                // the archive-and-purge work here, dispatched to a background
-                // channel/worker, not awaited inline (see Phase 3 plan).
+                // NEW -- Phase 3b: trip close detected via the device_status_updates
+                // path. See class summary for why this mirrors the same check in
+                // CheckLocationAlertsAsync rather than relying on only one.
+                if (!data.IgnitionStatus)
+                {
+                    tripJustClosed = true;
+                }
             }
             state.IgnitionStatus = data.IgnitionStatus;
 
@@ -285,6 +302,11 @@ public class LocationNotificationListener : BackgroundService
             state.IsLowBattery = isLowBattery;
         }
 
+        if (tripJustClosed)
+        {
+            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, DateTime.UtcNow));
+        }
+
         if (alertsToCreate.Count > 0)
         {
             await PersistAlertsAsync(alertsToCreate, data.VehicleId!.Value);
@@ -306,10 +328,6 @@ public class LocationNotificationListener : BackgroundService
 
         _logger.LogInformation("Created {Count} alert(s) for vehicle {VehicleId}", alerts.Count, vehicleId);
 
-        // NEW -- send a push for each alert just created. Resolves the vehicle's
-        // owning customer once, reuses it for every alert in this batch (there's
-        // usually only one, but a single notification can occasionally carry
-        // more than one alert-worthy change at once).
         var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId);
         if (vehicle is null)
         {

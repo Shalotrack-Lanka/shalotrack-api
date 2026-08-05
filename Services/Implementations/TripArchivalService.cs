@@ -16,10 +16,10 @@ public class TripArchivalService : ITripArchivalService
     private const decimal MovingSpeedThresholdKmh = 7m;
 
     // Defensive cap for when no valid prior IgnitionOn can be resolved (first-ever
-    // trip, alert history lost before the Phase 2 fix shipped, or the only
-    // candidate IgnitionOn was already closed by an intervening IgnitionOff --
-    // see ResolveTripStartAsync). 24h is a safety ceiling, not a real trip
-    // boundary in this fallback case.
+    // trip, alert history lost before the Phase 2 fix shipped, a candidate closed
+    // by an intervening IgnitionOff, or a candidate simply too old -- see
+    // ResolveTripStartAsync). 24h is a safety ceiling, not a real trip boundary
+    // in this fallback case.
     private static readonly TimeSpan FallbackMaxTripDuration = TimeSpan.FromHours(24);
 
     private readonly IGpsTrackingRepository _gpsTrackingRepository;
@@ -41,8 +41,7 @@ public class TripArchivalService : ITripArchivalService
         // GpsTrackings is NOT wired into IUnitOfWork, so that one is injected
         // directly instead. This split looks inconsistent; it is deliberate --
         // see the Phase 2/3a postmortems for what happens when that's assumed
-        // without checking (IUnitOfWork.DeviceStatuses was declared but never
-        // wired either, and stayed broken until something finally called it).
+        // without checking.
         _unitOfWork = unitOfWork;
 
         _s3Client = s3Client;
@@ -69,7 +68,7 @@ public class TripArchivalService : ITripArchivalService
             _logger.LogInformation(
                 "TripArchivalService: no GpsTrackings points for device {DeviceId} in [{From}, {To}] -- nothing to archive.",
                 deviceId, tripStart, tripEndTime);
-            return new TripArchivalResult(true, null, 0, null);
+            return new TripArchivalResult(true, null, 0, null, tripStart);
         }
 
         var features = points.Select(p => new
@@ -127,14 +126,14 @@ public class TripArchivalService : ITripArchivalService
             _logger.LogError(ex,
                 "TripArchivalService: S3 write failed for device {DeviceId}, key {Key}.",
                 deviceId, s3Key);
-            return new TripArchivalResult(false, null, points.Count, ex.Message);
+            return new TripArchivalResult(false, null, points.Count, ex.Message, tripStart);
         }
 
         _logger.LogInformation(
             "TripArchivalService: archived {Count} point(s) for device {DeviceId} to {Key}.",
             points.Count, deviceId, s3Key);
 
-        return new TripArchivalResult(true, s3Key, points.Count, null);
+        return new TripArchivalResult(true, s3Key, points.Count, null, tripStart);
     }
 
     private async Task<DateTime> ResolveTripStartAsync(Guid deviceId, DateTime tripEndTime)
@@ -146,20 +145,18 @@ public class TripArchivalService : ITripArchivalService
         {
             var candidateAge = tripEndTime - ignitionOnAlert.TriggeredAt;
 
-            // FIX #2 (post re-test on WP CAD 9934): the intervening-IgnitionOff
-            // check alone isn't enough. A device that goes permanently dark
-            // (dead battery, lost SIM, physically disconnected) without ever
-            // reporting an IgnitionOff looks IDENTICAL to a legitimately still-
-            // open trip from this query's point of view -- "no intervening
-            // close-out" is true in both cases. This age ceiling is the real
-            // primary guard; the intervening-alert check below is an
-            // additional guard on top of it, not a substitute for it.
+            // A device that goes permanently dark (dead battery, lost SIM,
+            // physically disconnected) without ever reporting an IgnitionOff
+            // looks IDENTICAL to a legitimately still-open trip from this
+            // query's point of view. This age ceiling is the primary guard;
+            // the intervening-alert check below is additional, not a
+            // substitute for it.
             if (candidateAge <= FallbackMaxTripDuration)
             {
-                // FIX #1 (post Phase 3a manual test on WP CAD 9934): a candidate
-                // IgnitionOn is only valid as this trip's start if nothing closed
-                // it in between. Without this, a stale IgnitionOn gets paired
-                // with today's IgnitionOff, producing a bogus multi-day "trip".
+                // A candidate IgnitionOn is only valid as this trip's start if
+                // nothing closed it in between. Without this, a stale
+                // IgnitionOn gets paired with today's IgnitionOff, producing a
+                // bogus multi-day "trip".
                 var hasInterveningIgnitionOff = await _unitOfWork.Alerts.ExistsByDeviceAndTypeBetweenAsync(
                     deviceId, AlertType.IgnitionOff, ignitionOnAlert.TriggeredAt, tripEndTime);
 
