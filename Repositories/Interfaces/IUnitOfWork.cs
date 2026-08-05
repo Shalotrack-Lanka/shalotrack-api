@@ -9,6 +9,7 @@ public interface IUnitOfWork
     IAlertRepository Alerts { get; }                        // NEW
     ICustomerFcmTokenRepository FcmTokens { get; }           // NEW
     ISubscriptionRepository Subscriptions { get; }           // NEW
+    IDeviceStatusRepository DeviceStatuses { get; }
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();

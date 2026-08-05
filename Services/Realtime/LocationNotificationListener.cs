@@ -30,8 +30,18 @@ namespace ShaloTrack_API.Services.Realtime;
 /// CRITICAL: RealtimeConnection MUST use the session pooler (port 5432), never
 /// the transaction pooler. See earlier setup notes.
 ///
-/// KNOWN TRADEOFF: all state is tracked in memory, lost on process restart.
-/// Acceptable for now -- a missed alert is low severity, not a safety issue.
+/// State seeding: in-memory state is rebuilt from DeviceStatuses before the
+/// first LISTEN and again after every reconnect (not just on process restart --
+/// a transient connection drop has the exact same blind spot, since any
+/// DeviceStatuses update during the gap never fires a NOTIFY this listener
+/// saw). This is what makes IgnitionOff detection safe to depend on for
+/// anything that matters -- e.g. the trip-archival trigger (Phase 3).
+///
+/// KNOWN REMAINING GAP: IsSpeeding is not seeded, since DeviceStatuses carries
+/// no speed field -- only location_updates does. A missed overspeed alert
+/// across a restart/reconnect is still possible. Low severity, not addressed
+/// here; revisit only if overspeed alerting needs the same guarantee ignition
+/// detection now has.
 /// </summary>
 public class LocationNotificationListener : BackgroundService
 {
@@ -68,6 +78,13 @@ public class LocationNotificationListener : BackgroundService
             {
                 await using var connection = new NpgsqlConnection(_connectionString);
                 await connection.OpenAsync(stoppingToken);
+
+                // Rebuild in-memory state from the DB BEFORE registering the
+                // notification handler or issuing LISTEN, so nothing arriving
+                // right after connect can race against a half-seeded cache.
+                // Runs on first startup AND on every reconnect -- see class
+                // summary for why the reconnect case matters just as much.
+                await SeedDeviceStatesFromDatabaseAsync(stoppingToken);
 
                 connection.Notification += async (sender, args) =>
                 {
@@ -115,6 +132,37 @@ public class LocationNotificationListener : BackgroundService
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
+    }
+
+    // ---- state seeding (startup + every reconnect) ----
+
+    private async Task SeedDeviceStatesFromDatabaseAsync(CancellationToken stoppingToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+        // ASSUMPTION TO VERIFY: this assumes IUnitOfWork exposes a
+        // .DeviceStatuses property backed by IDeviceStatusRepository, mirroring
+        // .Alerts / .Vehicles already used elsewhere in this file. If the real
+        // interface names it differently, adjust this one line accordingly --
+        // nothing else in this method depends on the name.
+        var statuses = await unitOfWork.DeviceStatuses.GetAllAsync();
+
+        foreach (var status in statuses)
+        {
+            var state = _deviceStates.GetOrAdd(status.DeviceId, _ => new DeviceAlertState());
+
+            lock (state)
+            {
+                state.IgnitionStatus = status.IgnitionStatus;
+                state.PowerStatus = (int)status.PowerStatus == 1; // 1 = Disconnected, matches DeviceStatusNotificationPayload.PowerStatus
+                state.IsLowBattery = status.BatteryLevel < LowBatteryThresholdPercent;
+            }
+        }
+
+        _logger.LogInformation(
+            "LocationNotificationListener: seeded state for {Count} device(s) from DeviceStatuses.",
+            statuses.Count);
     }
 
     // ---- location_updates ----
@@ -200,6 +248,12 @@ public class LocationNotificationListener : BackgroundService
                     data.VehicleId!.Value, data.DeviceId, null, null,
                     data.IgnitionStatus ? AlertType.IgnitionOn : AlertType.IgnitionOff,
                     data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off"));
+
+                // TODO (Phase 3): this is where the trip-archival trigger hooks
+                // in. When data.IgnitionStatus == false (trip just closed),
+                // this is the exact, single point where that's known -- queue
+                // the archive-and-purge work here, dispatched to a background
+                // channel/worker, not awaited inline (see Phase 3 plan).
             }
             state.IgnitionStatus = data.IgnitionStatus;
 

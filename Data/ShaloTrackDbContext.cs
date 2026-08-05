@@ -97,5 +97,13 @@ public class ShaloTrackDbContext : DbContext
             .HasOne(s => s.Customer)
             .WithMany()
             .HasForeignKey(s => s.CustomerId);
+
+        modelBuilder.Entity<Alert>()
+            .HasIndex(a => new { a.DeviceId, a.AlertType, a.TriggeredAt })
+            .HasDatabaseName("IX_Alerts_DeviceId_AlertType_TriggeredAt");
+
+        modelBuilder.Entity<RawPacket>()
+            .HasIndex(r => new { r.DeviceId, r.ReceivedAt })
+            .HasDatabaseName("IX_RawPackets_DeviceId_ReceivedAt");
     }
 }
