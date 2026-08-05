@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using ShaloTrack_API.Data;
+using ShaloTrack_API.Enums;
 using ShaloTrack_API.Models;
 using ShaloTrack_API.Repositories.Interfaces;
 
@@ -37,5 +38,14 @@ public class AlertRepository : IAlertRepository
     public async Task AddAsync(Alert alert)
     {
         await _context.Alerts.AddAsync(alert);
+    }
+
+    public async Task<Alert?> GetMostRecentByDeviceAndTypeAsync(Guid deviceId, AlertType alertType, DateTime before)
+    {
+        return await _context.Alerts
+            .AsNoTracking()
+            .Where(a => a.DeviceId == deviceId && a.AlertType == alertType && a.TriggeredAt < before)
+            .OrderByDescending(a => a.TriggeredAt)
+            .FirstOrDefaultAsync();
     }
 }

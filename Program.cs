@@ -27,6 +27,12 @@ builder.Services.AddDatabaseServices(builder.Configuration);
 builder.Services.AddRepositoryServices();
 builder.Services.AddBusinessServices();
 
+// ---- GPS TRIP ARCHIVAL (NEW -- Phase 3a) ----
+// S3 write only, no delete permission granted at the IAM level. Not wired
+// into LocationNotificationListener yet -- inert until Phase 3b calls it.
+builder.Services.AddAwsServices();
+builder.Services.AddScoped<ITripArchivalService, TripArchivalService>();
+
 // ASP.NET Core
 builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();

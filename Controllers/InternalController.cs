@@ -15,15 +15,18 @@ public class InternalController : ControllerBase
     private readonly ICustomerService _customerService;
     private readonly IVehicleService _vehicleService;
     private readonly IGpsTrackingService _gpsTrackingService;
+    private readonly ITripArchivalService _tripArchivalService; // NEW -- Phase 3a manual test only
 
     public InternalController(
         ICustomerService customerService,
         IVehicleService vehicleService,
-        IGpsTrackingService gpsTrackingService)
+        IGpsTrackingService gpsTrackingService,
+        ITripArchivalService tripArchivalService) // NEW
     {
         _customerService = customerService;
         _vehicleService = vehicleService;
         _gpsTrackingService = gpsTrackingService;
+        _tripArchivalService = tripArchivalService; // NEW
     }
 
     [HttpGet("customers-sync")]
@@ -76,6 +79,37 @@ public class InternalController : ControllerBase
             vehicle,
             currentLocation = trackingResponse.Data?.FirstOrDefault(), // most recent point — history is newest-first
             trackingHistory = trackingResponse.Data,
+        });
+    }
+
+    // NEW -- Phase 3a manual verification ONLY. Not a real feature endpoint.
+    // Do not call this against a device with live gateway traffic -- see chat
+    // history for why (WP JK 9931 vs WP CAD 9934). Same auth model as every
+    // other action in this controller: protected by AdminSyncKeyMiddleware's
+    // X-Admin-Sync-Key header check on the /api/internal prefix, nothing more --
+    // treat it as reachable only via `curl localhost` from inside an SSM
+    // session, never through the public ALB/Cloudflare path. Remove this action
+    // once Phase 3b wires ArchiveTripAsync into the real listener trigger and
+    // this manual path is no longer needed.
+    [HttpGet("archive-trip-test")]
+    public async Task<IActionResult> ArchiveTripTest(
+        [FromQuery] Guid deviceId,
+        [FromQuery] Guid vehicleId,
+        [FromQuery] DateTime tripEndTime)
+    {
+        // Same Kind=Unspecified vs Kind=Utc fix as GpsTrackingSync above --
+        // applied here up front rather than rediscovering it a second time.
+        tripEndTime = DateTime.SpecifyKind(tripEndTime, DateTimeKind.Utc);
+
+        var result = await _tripArchivalService.ArchiveTripAsync(deviceId, vehicleId, tripEndTime);
+
+        return Ok(new
+        {
+            statusCode = result.Success ? 200 : 500,
+            result.Success,
+            result.S3Key,
+            result.PointCount,
+            result.ErrorMessage
         });
     }
 }

@@ -18,8 +18,7 @@ public class UnitOfWork : IUnitOfWork
     public IAlertRepository Alerts { get; }                       // NEW
     public ICustomerFcmTokenRepository FcmTokens { get; }         // NEW
     public ISubscriptionRepository Subscriptions { get; }         // NEW
-
-    public IDeviceStatusRepository DeviceStatuses { get; }
+    public IDeviceStatusRepository DeviceStatuses { get; }        // FIX -- was declared but never assigned (CS8618); constructor now takes and wires it, same pattern as every other repository here
 
     public UnitOfWork(
         ShaloTrackDbContext context,
@@ -29,7 +28,8 @@ public class UnitOfWork : IUnitOfWork
         IDeviceAssignmentRepository deviceAssignmentRepository,
         IAlertRepository alertRepository,                         // NEW
         ICustomerFcmTokenRepository customerFcmTokenRepository,   // NEW
-        ISubscriptionRepository subscriptionRepository)           // NEW
+        ISubscriptionRepository subscriptionRepository,           // NEW
+        IDeviceStatusRepository deviceStatusRepository)           // FIX
     {
         _context = context;
         Customers = customerRepository;
@@ -39,6 +39,7 @@ public class UnitOfWork : IUnitOfWork
         Alerts = alertRepository;                                 // NEW
         FcmTokens = customerFcmTokenRepository;                   // NEW
         Subscriptions = subscriptionRepository;                   // NEW
+        DeviceStatuses = deviceStatusRepository;                  // FIX
     }
 
     public async Task<int> SaveChangesAsync()
