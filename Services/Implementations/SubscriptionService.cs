@@ -45,6 +45,24 @@ public class SubscriptionService : ISubscriptionService
                 $"'{dto.Plan}' is not a recognized plan. Expected Free, OneYear, TwoYears, or ThreeYears.");
         }
 
+        // Subscriptions here map to a single device warranty period, not a
+        // feature tier -- there is no meaningful state where a customer
+        // has two simultaneous "active periods". Block a new request
+        // while one is already Active or PendingPayment; Expired/
+        // Cancelled subscriptions don't block (a lapsed customer should
+        // be able to renew).
+        var existing = await _unitOfWork.Subscriptions.GetByCustomerAsync(customer.CustomerId);
+        var blockingSubscription = existing.FirstOrDefault(s =>
+            s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.PendingPayment);
+        if (blockingSubscription is not null)
+        {
+            return ApiResponse<SubscriptionResponseDto>.Fail(
+                (int)HttpStatusCode.Conflict,
+                "You already have a subscription in progress.",
+                $"Your {blockingSubscription.Plan} plan is currently '{blockingSubscription.Status}'. " +
+                "Wait for it to expire, or contact support if you believe this is an error.");
+        }
+
         // Price is determined here, server-side, from the plan -- never
         // trusted from the client. A request that sent its own price
         // would let anyone claim a 3-year plan at the Free price by just
