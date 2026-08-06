@@ -25,12 +25,11 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<CustomerFcmToken> CustomerFcmTokens => Set<CustomerFcmToken>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();   // NEW
-
+    public DbSet<EmergencyContact> EmergencyContacts => Set<EmergencyContact>();   // NEW
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-
         modelBuilder.Entity<Customer>()
             .HasIndex(c => c.FirebaseUid)
             .IsUnique();
@@ -97,6 +96,12 @@ public class ShaloTrackDbContext : DbContext
             .HasOne(s => s.Customer)
             .WithMany()
             .HasForeignKey(s => s.CustomerId);
+
+        // NEW
+        modelBuilder.Entity<EmergencyContact>()
+            .HasOne(c => c.Customer)
+            .WithMany()
+            .HasForeignKey(c => c.CustomerId);
 
         modelBuilder.Entity<Alert>()
             .HasIndex(a => new { a.DeviceId, a.AlertType, a.TriggeredAt })

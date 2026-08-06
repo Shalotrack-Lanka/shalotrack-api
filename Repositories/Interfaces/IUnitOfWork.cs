@@ -10,6 +10,7 @@ public interface IUnitOfWork
     ICustomerFcmTokenRepository FcmTokens { get; }           // NEW
     ISubscriptionRepository Subscriptions { get; }           // NEW
     IDeviceStatusRepository DeviceStatuses { get; }
+    IEmergencyContactRepository EmergencyContacts { get; }   // NEW
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();

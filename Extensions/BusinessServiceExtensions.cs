@@ -26,6 +26,7 @@ public static class BusinessServiceExtensions
         // gateway (PayHere, etc.) is integrated; nothing else needs to
         // change.
         services.AddScoped<IPaymentProvider, ManualPaymentProvider>();     // NEW
+        services.AddScoped<IEmergencyContactService, EmergencyContactService>();  // NEW
         return services;
     }
 }
