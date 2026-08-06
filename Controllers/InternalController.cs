@@ -44,7 +44,10 @@ public class InternalController : ControllerBase
     }
 
     [HttpGet("gps-tracking-sync")]
-    public async Task<IActionResult> GpsTrackingSync([FromQuery] GpsTrackingFilter filter, [FromQuery] string? imei)
+    public async Task<IActionResult> GpsTrackingSync(
+        [FromQuery] GpsTrackingFilter filter,
+        [FromQuery] string? imei,
+        [FromQuery] string? vehicleNumber)
     {
         // FIX: HTML datetime-local inputs parse as Kind=Unspecified, but Npgsql
         // requires Kind=Utc for "timestamp with time zone" columns — crashes
@@ -53,6 +56,22 @@ public class InternalController : ControllerBase
         if (filter.To.HasValue) filter.To = DateTime.SpecifyKind(filter.To.Value, DateTimeKind.Utc);
 
         var vehiclesResponse = await _vehicleService.GetAllAsync();
+
+        // NEW: search by Vehicle Number — checked first since Admin's search
+        // box now resolves plate numbers here instead of querying the
+        // Vehicles table directly (Admin has no direct DB access to it).
+        if (!string.IsNullOrWhiteSpace(vehicleNumber) && !filter.VehicleId.HasValue)
+        {
+            var matchedByNumber = vehiclesResponse.Data?.FirstOrDefault(v =>
+                string.Equals(v.VehicleNumber, vehicleNumber, StringComparison.OrdinalIgnoreCase));
+
+            if (matchedByNumber is null)
+            {
+                return StatusCode(404, ApiResponse<string>.Fail(
+                    404, "Vehicle not found.", $"No vehicle with number '{vehicleNumber}' was found."));
+            }
+            filter.VehicleId = matchedByNumber.VehicleId;
+        }
 
         if (!string.IsNullOrWhiteSpace(imei) && !filter.VehicleId.HasValue)
         {
@@ -67,7 +86,7 @@ public class InternalController : ControllerBase
 
         if (!filter.VehicleId.HasValue)
         {
-            return StatusCode(400, ApiResponse<string>.Fail(400, "Vehicle ID or IMEI is required."));
+            return StatusCode(400, ApiResponse<string>.Fail(400, "Vehicle Number or IMEI is required."));
         }
 
         var vehicle = vehiclesResponse.Data?.FirstOrDefault(v => v.VehicleId == filter.VehicleId.Value);
