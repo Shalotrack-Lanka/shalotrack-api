@@ -27,6 +27,7 @@ public static class BusinessServiceExtensions
         // change.
         services.AddScoped<IPaymentProvider, ManualPaymentProvider>();     // NEW
         services.AddScoped<IEmergencyContactService, EmergencyContactService>();  // NEW
+        services.AddScoped<ISetupShalotrackDeviceService, SetupShalotrackDeviceService>(); // NEW
         return services;
     }
 }

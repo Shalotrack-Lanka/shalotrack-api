@@ -22,6 +22,7 @@ public static class RepositoryServiceExtensions
         services.AddScoped<ISubscriptionRepository, SubscriptionRepository>();          // NEW
         services.AddScoped<IRawPacketRepository, RawPacketRepository>();                // NEW -- Phase 3b
         services.AddScoped<IEmergencyContactRepository, EmergencyContactRepository>();  // NEW
+        services.AddScoped<ISetupShalotrackDeviceRepository, SetupShalotrackDeviceRepository>(); // NEW
 
         // Unit of Work
         services.AddScoped<IUnitOfWork, UnitOfWork>();

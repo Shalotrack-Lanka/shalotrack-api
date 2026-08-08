@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using ShaloTrack_API.Filters;
 using ShaloTrack_API.Responses;
 using ShaloTrack_API.Services.Interfaces;
+using ShaloTrack_API.DTOs.SetupShalotrackDevice;
 using System.Linq;
 
 namespace ShaloTrack_API.Controllers;
@@ -16,17 +17,20 @@ public class InternalController : ControllerBase
     private readonly IVehicleService _vehicleService;
     private readonly IGpsTrackingService _gpsTrackingService;
     private readonly ITripArchivalService _tripArchivalService; // NEW -- Phase 3a manual test only
+    private readonly ISetupShalotrackDeviceService _setupShalotrackDeviceService; // NEW
 
     public InternalController(
         ICustomerService customerService,
         IVehicleService vehicleService,
         IGpsTrackingService gpsTrackingService,
-        ITripArchivalService tripArchivalService) // NEW
+        ITripArchivalService tripArchivalService, // NEW
+        ISetupShalotrackDeviceService setupShalotrackDeviceService) // NEW
     {
         _customerService = customerService;
         _vehicleService = vehicleService;
         _gpsTrackingService = gpsTrackingService;
         _tripArchivalService = tripArchivalService; // NEW
+        _setupShalotrackDeviceService = setupShalotrackDeviceService; // NEW
     }
 
     [HttpGet("customers-sync")]
@@ -99,6 +103,17 @@ public class InternalController : ControllerBase
             currentLocation = trackingResponse.Data?.FirstOrDefault(), // most recent point — history is newest-first
             trackingHistory = trackingResponse.Data,
         });
+    }
+
+    // NEW -- Admin pushes its Setup Shalotrack Devices registry here (create
+    // or update) so the mobile side knows about every physical device
+    // ShaloTrack has set up, for activation purposes. Deliberately a
+    // separate table from GpsDevices, not a merge — see chat/PR notes.
+    [HttpPost("setup-devices-sync")]
+    public async Task<IActionResult> SetupDevicesSync([FromBody] SyncSetupShalotrackDeviceDto dto)
+    {
+        var response = await _setupShalotrackDeviceService.UpsertAsync(dto);
+        return StatusCode(response.StatusCode, response);
     }
 
     // NEW -- Phase 3a manual verification ONLY. Not a real feature endpoint.

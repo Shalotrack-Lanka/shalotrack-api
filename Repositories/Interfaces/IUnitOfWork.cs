@@ -11,6 +11,7 @@ public interface IUnitOfWork
     ISubscriptionRepository Subscriptions { get; }           // NEW
     IDeviceStatusRepository DeviceStatuses { get; }
     IEmergencyContactRepository EmergencyContacts { get; }   // NEW
+    ISetupShalotrackDeviceRepository SetupShalotrackDevices { get; } // NEW
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();

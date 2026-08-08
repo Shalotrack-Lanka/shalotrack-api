@@ -26,6 +26,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<CustomerFcmToken> CustomerFcmTokens => Set<CustomerFcmToken>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();   // NEW
     public DbSet<EmergencyContact> EmergencyContacts => Set<EmergencyContact>();   // NEW
+    public DbSet<SetupShalotrackDevice> SetupShalotrackDevices => Set<SetupShalotrackDevice>();   // NEW
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -110,5 +111,16 @@ public class ShaloTrackDbContext : DbContext
         modelBuilder.Entity<RawPacket>()
             .HasIndex(r => new { r.DeviceId, r.ReceivedAt })
             .HasDatabaseName("IX_RawPackets_DeviceId_ReceivedAt");
+
+        // NEW -- SetupShalotrackDevice.Id mirrors Admin's shdevice_id
+        // directly, not an identity column, since this table is a straight
+        // mirror of Admin's data rather than a locally-originated entity.
+        modelBuilder.Entity<SetupShalotrackDevice>()
+            .Property(d => d.Id)
+            .ValueGeneratedNever();
+
+        modelBuilder.Entity<SetupShalotrackDevice>()
+            .HasIndex(d => d.ImeiNumber)
+            .IsUnique();
     }
 }
