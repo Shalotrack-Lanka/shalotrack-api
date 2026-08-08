@@ -138,6 +138,7 @@ public class EmergencyContactService : IEmergencyContactService
         var active = subscriptions.FirstOrDefault(s => s.Status == SubscriptionStatus.Active);
         // No active subscription at all (never subscribed) defaults to the
         // most conservative (Free-tier) limit, not zero and not unlimited.
+
         return active is null ? GetContactLimitForPlan(SubscriptionPlan.Free) : GetContactLimitForPlan(active.Plan);
     }
 
