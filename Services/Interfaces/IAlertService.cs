@@ -5,7 +5,8 @@ namespace ShaloTrack_API.Services.Interfaces;
 
 public interface IAlertService
 {
-    Task<ApiResponse<IReadOnlyList<AlertResponseDto>>> GetMyAlertsAsync(int page, int pageSize);
+    // NEW: vehicleId optional, null = all vehicles (existing behavior unchanged).
+    Task<ApiResponse<IReadOnlyList<AlertResponseDto>>> GetMyAlertsAsync(int page, int pageSize, Guid? vehicleId = null);
     Task<ApiResponse<string>> MarkAsReadAsync(long alertId);
     Task<ApiResponse<string>> RegisterFcmTokenAsync(RegisterFcmTokenDto dto);
 }

@@ -17,10 +17,12 @@ public class AlertsController : ControllerBase
         _alertService = alertService;
     }
 
+    // NEW: vehicleId is optional -- GET /api/Alerts?vehicleId=... filters to
+    // one vehicle; omitting it keeps the existing "all my vehicles" behavior.
     [HttpGet]
-    public async Task<IActionResult> GetMyAlerts([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    public async Task<IActionResult> GetMyAlerts([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] Guid? vehicleId = null)
     {
-        var response = await _alertService.GetMyAlertsAsync(page, pageSize);
+        var response = await _alertService.GetMyAlertsAsync(page, pageSize, vehicleId);
         return StatusCode(response.StatusCode, response);
     }
 

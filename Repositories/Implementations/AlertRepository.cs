@@ -15,12 +15,22 @@ public class AlertRepository : IAlertRepository
         _context = context;
     }
 
-    public async Task<List<Alert>> GetByCustomerAsync(Guid customerId, int page, int pageSize)
+    public async Task<List<Alert>> GetByCustomerAsync(Guid customerId, int page, int pageSize, Guid? vehicleId = null)
     {
-        return await _context.Alerts
+        var query = _context.Alerts
             .AsNoTracking()
             .Include(a => a.Vehicle)
-            .Where(a => a.Vehicle.CustomerId == customerId)
+            .Where(a => a.Vehicle.CustomerId == customerId);
+
+        // NEW: still combined with the CustomerId filter above, so a
+        // vehicleId belonging to a different customer just yields an
+        // empty result rather than exposing anything.
+        if (vehicleId.HasValue)
+        {
+            query = query.Where(a => a.VehicleId == vehicleId.Value);
+        }
+
+        return await query
             .OrderByDescending(a => a.TriggeredAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)

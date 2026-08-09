@@ -5,7 +5,12 @@ namespace ShaloTrack_API.Repositories.Interfaces;
 
 public interface IAlertRepository
 {
-    Task<List<Alert>> GetByCustomerAsync(Guid customerId, int page, int pageSize);
+    // NEW: vehicleId is optional -- null means "all of this customer's
+    // vehicles" (unchanged existing behavior), a real value filters to
+    // just that one. Safe by construction: still combined with the
+    // CustomerId check in the implementation, so a vehicleId belonging to
+    // someone else just returns an empty list, not another customer's data.
+    Task<List<Alert>> GetByCustomerAsync(Guid customerId, int page, int pageSize, Guid? vehicleId = null);
     Task<Alert?> GetByIdAsync(long alertId);
     Task AddAsync(Alert alert);
 

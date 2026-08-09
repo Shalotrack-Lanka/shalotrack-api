@@ -19,7 +19,7 @@ public class AlertService : IAlertService
         _currentUser = currentUser;
     }
 
-    public async Task<ApiResponse<IReadOnlyList<AlertResponseDto>>> GetMyAlertsAsync(int page, int pageSize)
+    public async Task<ApiResponse<IReadOnlyList<AlertResponseDto>>> GetMyAlertsAsync(int page, int pageSize, Guid? vehicleId = null)
     {
         var uid = _currentUser.FirebaseUid;
         if (string.IsNullOrEmpty(uid))
@@ -38,7 +38,7 @@ public class AlertService : IAlertService
         if (pageSize > 100) pageSize = 100;
         if (page < 1) page = 1;
 
-        var alerts = await _unitOfWork.Alerts.GetByCustomerAsync(customer.CustomerId, page, pageSize);
+        var alerts = await _unitOfWork.Alerts.GetByCustomerAsync(customer.CustomerId, page, pageSize, vehicleId);
 
         var dtoList = alerts.Select(ToDto).ToList();
 
