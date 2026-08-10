@@ -87,4 +87,13 @@ public class DeviceEventRepository : IDeviceEventRepository
             .Select(DeviceEventMappings.ToResponseDto)
             .FirstOrDefaultAsync();
     }
+
+    // NEW: first write path into DeviceEvents from the C# API. Every
+    // existing row is written by the gateway through a separate path
+    // (direct DB insert, see gateway's own event_service.py) -- this
+    // repository was read-only before this addition.
+    public async Task AddAsync(Models.DeviceEvent deviceEvent)
+    {
+        await _context.DeviceEvents.AddAsync(deviceEvent);
+    }
 }
