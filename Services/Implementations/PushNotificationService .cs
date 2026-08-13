@@ -31,7 +31,8 @@ public class PushNotificationService : IPushNotificationService
             {
                 var message = new Message
                 {
-                    Token = token.FcmToken,
+                    // FIX CS0618: Replaced deprecated 'Token' with 'Fid'
+                    Fid = token.FcmToken,
                     Notification = new Notification
                     {
                         Title = title,

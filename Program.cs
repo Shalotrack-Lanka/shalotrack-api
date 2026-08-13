@@ -107,7 +107,8 @@ var firebaseServiceAccountJson = builder.Configuration["Firebase:ServiceAccountJ
 
 FirebaseApp.Create(new AppOptions
 {
-    Credential = GoogleCredential.FromJson(firebaseServiceAccountJson)
+    Credential = CredentialFactory.FromJson<ServiceAccountCredential>(firebaseServiceAccountJson)
+                                  .ToGoogleCredential()
 });
 
 builder.Services.AddScoped<IPushNotificationService, PushNotificationService>();
