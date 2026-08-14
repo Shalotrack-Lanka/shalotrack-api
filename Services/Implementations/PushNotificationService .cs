@@ -29,16 +29,17 @@ public class PushNotificationService : IPushNotificationService
         {
             try
             {
+#pragma warning disable CS0618 // Token is marked obsolete in SDK, but required for FCM registration tokens
                 var message = new Message
                 {
-                    // FIX CS0618: Replaced deprecated 'Token' with 'Fid'
-                    Fid = token.FcmToken,
+                    Token = token.FcmToken,
                     Notification = new Notification
                     {
                         Title = title,
                         Body = body
                     }
                 };
+#pragma warning restore CS0618
 
                 await FirebaseMessaging.DefaultInstance.SendAsync(message);
                 _logger.LogInformation("Push sent to customer {CustomerId}, token ending ...{TokenTail}",
