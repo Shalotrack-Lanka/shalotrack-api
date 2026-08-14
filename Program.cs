@@ -107,8 +107,21 @@ var firebaseServiceAccountJson = builder.Configuration["Firebase:ServiceAccountJ
 
 FirebaseApp.Create(new AppOptions
 {
+    // FIX: CredentialFactory.FromJson<ServiceAccountCredential>() -- unlike
+    // the old (deprecated) GoogleCredential.FromJson(), which Firebase
+    // Admin SDK scopes internally -- produces a credential with NO OAuth
+    // scope attached at all unless one is explicitly set. The app still
+    // boots fine and the credential still looks valid, but every actual
+    // call to Google's messaging API gets silently rejected for lacking
+    // permission. This is the real cause of FCM push breaking after the
+    // CredentialFactory migration (confirmed against the actual timeline:
+    // worked before that change, stopped right after).
+    //
+    // CreateScoped() lives on GoogleCredential, not ServiceAccountCredential
+    // -- it has to come AFTER ToGoogleCredential() in this chain, not before.
     Credential = CredentialFactory.FromJson<ServiceAccountCredential>(firebaseServiceAccountJson)
                                   .ToGoogleCredential()
+                                  .CreateScoped("https://www.googleapis.com/auth/firebase.messaging")
 });
 
 builder.Services.AddScoped<IPushNotificationService, PushNotificationService>();
