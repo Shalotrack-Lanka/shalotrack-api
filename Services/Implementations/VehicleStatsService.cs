@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using ShaloTrack_API.Auth;
+using ShaloTrack_API.DTOs.GpsTracking;
 using ShaloTrack_API.DTOs.VehicleStats;
 using ShaloTrack_API.Enums;
 using ShaloTrack_API.Repositories.Interfaces;
@@ -14,6 +15,11 @@ public class VehicleStatsService : IVehicleStatsService
     private readonly ICurrentUser _currentUser;
     private readonly IGpsTrackingService _gpsTrackingService;
 
+    // Sri Lanka Standard Time -- fixed UTC+5:30, no DST, matching the same
+    // conversion already used elsewhere in this project (the gateway's own
+    // logger does the same thing for display purposes).
+    private static readonly TimeSpan SriLankaOffset = TimeSpan.FromHours(5.5);
+
     public VehicleStatsService(
         IUnitOfWork unitOfWork,
         ICurrentUser currentUser,
@@ -24,7 +30,7 @@ public class VehicleStatsService : IVehicleStatsService
         _gpsTrackingService = gpsTrackingService;
     }
 
-    public async Task<ApiResponse<VehicleStatsResponseDto>> GetStatsAsync(Guid vehicleId)
+    public async Task<ApiResponse<VehicleStatsResponseDto>> GetStatsAsync(Guid vehicleId, string? period)
     {
         var uid = _currentUser.FirebaseUid;
         if (string.IsNullOrEmpty(uid))
@@ -47,10 +53,8 @@ public class VehicleStatsService : IVehicleStatsService
                 (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'.");
         }
 
-        // "All-time" -- from the vehicle's own creation date to now, rather
-        // than an arbitrary fixed lookback window.
-        var from = vehicle.CreatedAt;
-        var to = DateTime.UtcNow;
+        var normalizedPeriod = (period ?? "today").ToLowerInvariant();
+        var (from, to) = ResolvePeriodRange(normalizedPeriod, vehicle.CreatedAt);
 
         var tripsResult = await _gpsTrackingService.GetTripsSummaryAsync(vehicleId, from, to);
         if (tripsResult.Data is null)
@@ -63,32 +67,101 @@ public class VehicleStatsService : IVehicleStatsService
 
         decimal totalDistanceKm = report.Trips.Sum(t => t.DistanceKm);
         decimal totalIdleMinutes = report.Stops.Sum(s => s.DurationMinutes);
+        decimal totalDrivingMinutes = report.Trips.Sum(t => t.DurationMinutes);
         decimal maxSpeed = report.Trips.Count > 0 ? report.Trips.Max(t => t.MaxSpeed) : 0;
 
-        // Duration-weighted average -- a 2-minute trip and a 2-hour trip
-        // shouldn't count equally toward the overall average speed.
-        decimal totalDurationMinutes = report.Trips.Sum(t => t.DurationMinutes);
-        decimal averageSpeed = totalDurationMinutes > 0
-            ? report.Trips.Sum(t => t.AvgSpeed * t.DurationMinutes) / totalDurationMinutes
+        decimal averageSpeed = totalDrivingMinutes > 0
+            ? report.Trips.Sum(t => t.AvgSpeed * t.DurationMinutes) / totalDrivingMinutes
             : 0;
 
         int overspeedIncidentCount = await _unitOfWork.Alerts.CountByVehicleAndTypeAsync(
             vehicleId, AlertType.Overspeed, from, to);
 
+        var dailyBreakdown = BuildDailyBreakdown(report.Trips, report.Stops, from, to);
+
         var stats = new VehicleStatsResponseDto
         {
             VehicleId = vehicleId,
+            Period = normalizedPeriod,
             PeriodFrom = from,
             PeriodTo = to,
             TotalDistanceKm = totalDistanceKm,
             TotalTripCount = report.TripCount,
+            TotalStopCount = report.StopCount,
             TotalIdleMinutes = totalIdleMinutes,
-            TotalDrivingMinutes = totalDurationMinutes,
+            TotalDrivingMinutes = totalDrivingMinutes,
+            TotalIgnitionOnMinutes = totalDrivingMinutes + totalIdleMinutes,
             AverageSpeed = averageSpeed,
             MaxSpeed = maxSpeed,
-            OverspeedIncidentCount = overspeedIncidentCount
+            OverspeedIncidentCount = overspeedIncidentCount,
+            DailyBreakdown = dailyBreakdown
         };
 
         return ApiResponse<VehicleStatsResponseDto>.Ok(stats, "Stats retrieved successfully.");
+    }
+
+    private static (DateTime from, DateTime to) ResolvePeriodRange(string period, DateTime vehicleCreatedAt)
+    {
+        var nowLocal = DateTime.UtcNow + SriLankaOffset;
+        var todayLocalStart = nowLocal.Date;
+
+        DateTime fromLocal;
+        switch (period)
+        {
+            case "week":
+                fromLocal = todayLocalStart.AddDays(-6); // last 7 days including today
+                break;
+            case "month":
+                fromLocal = todayLocalStart.AddDays(-29); // last 30 days including today
+                break;
+            case "all":
+                fromLocal = vehicleCreatedAt + SriLankaOffset;
+                break;
+            case "today":
+            default:
+                fromLocal = todayLocalStart;
+                break;
+        }
+
+        // Convert local boundaries back to UTC for the actual DB query.
+        var from = fromLocal - SriLankaOffset;
+        var to = DateTime.UtcNow;
+        return (from, to);
+    }
+
+    // Groups trips and stops by Sri Lanka LOCAL calendar day, not UTC --
+    // a trip starting late at night local time would otherwise be
+    // misattributed to the wrong day on the chart.
+    private static List<DailyStatDto> BuildDailyBreakdown(
+        List<TripSummaryDto> trips, List<StopSummaryDto> stops, DateTime from, DateTime to)
+    {
+        var fromLocalDate = (from + SriLankaOffset).Date;
+        var toLocalDate = (to + SriLankaOffset).Date;
+
+        var result = new List<DailyStatDto>();
+        for (var day = fromLocalDate; day <= toLocalDate; day = day.AddDays(1))
+        {
+            var dayTrips = trips.Where(t => (t.StartTime + SriLankaOffset).Date == day).ToList();
+            var dayStops = stops.Where(s => (s.StartTime + SriLankaOffset).Date == day).ToList();
+
+            decimal dayDrivingMinutes = dayTrips.Sum(t => t.DurationMinutes);
+            decimal dayIdleMinutes = dayStops.Sum(s => s.DurationMinutes);
+            decimal dayAvgSpeed = dayDrivingMinutes > 0
+                ? dayTrips.Sum(t => t.AvgSpeed * t.DurationMinutes) / dayDrivingMinutes
+                : 0;
+
+            result.Add(new DailyStatDto
+            {
+                Date = day,
+                DistanceKm = dayTrips.Sum(t => t.DistanceKm),
+                AverageSpeed = dayAvgSpeed,
+                MaxSpeed = dayTrips.Count > 0 ? dayTrips.Max(t => t.MaxSpeed) : 0,
+                TripCount = dayTrips.Count,
+                StopCount = dayStops.Count,
+                IgnitionOnMinutes = dayDrivingMinutes + dayIdleMinutes
+            });
+        }
+
+        return result;
     }
 }

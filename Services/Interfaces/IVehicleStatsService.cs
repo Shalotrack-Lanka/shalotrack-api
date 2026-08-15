@@ -5,5 +5,6 @@ namespace ShaloTrack_API.Services.Interfaces;
 
 public interface IVehicleStatsService
 {
-    Task<ApiResponse<VehicleStatsResponseDto>> GetStatsAsync(Guid vehicleId);
+    /// <summary>period: "today" | "week" | "month" | "all". Defaults to "today" if null/unrecognized.</summary>
+    Task<ApiResponse<VehicleStatsResponseDto>> GetStatsAsync(Guid vehicleId, string? period);
 }

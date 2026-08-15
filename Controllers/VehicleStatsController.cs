@@ -16,10 +16,11 @@ public class VehicleStatsController : ControllerBase
         _vehicleStatsService = vehicleStatsService;
     }
 
+    // GET /api/VehicleStats/{vehicleId}?period=today|week|month|all
     [HttpGet("{vehicleId:guid}")]
-    public async Task<IActionResult> GetStats(Guid vehicleId)
+    public async Task<IActionResult> GetStats(Guid vehicleId, [FromQuery] string? period)
     {
-        var response = await _vehicleStatsService.GetStatsAsync(vehicleId);
+        var response = await _vehicleStatsService.GetStatsAsync(vehicleId, period);
         return StatusCode(response.StatusCode, response);
     }
 }
