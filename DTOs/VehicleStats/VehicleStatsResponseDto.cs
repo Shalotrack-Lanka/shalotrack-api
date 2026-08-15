@@ -14,6 +14,11 @@ public class VehicleStatsResponseDto
     // reused as-is rather than building separate idle-detection logic.
     public decimal TotalIdleMinutes { get; set; }
 
+    // Sum of every Trip's duration -- exposed alongside TotalIdleMinutes
+    // specifically so the client can show a meaningful idle-vs-driving
+    // proportion, not just an idle number with nothing to compare it to.
+    public decimal TotalDrivingMinutes { get; set; }
+
     // Duration-weighted average across trips, not a plain mean of each
     // trip's own average -- a 2-minute trip and a 2-hour trip shouldn't
     // count equally toward the overall average.

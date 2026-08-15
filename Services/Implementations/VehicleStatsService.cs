@@ -83,6 +83,7 @@ public class VehicleStatsService : IVehicleStatsService
             TotalDistanceKm = totalDistanceKm,
             TotalTripCount = report.TripCount,
             TotalIdleMinutes = totalIdleMinutes,
+            TotalDrivingMinutes = totalDurationMinutes,
             AverageSpeed = averageSpeed,
             MaxSpeed = maxSpeed,
             OverspeedIncidentCount = overspeedIncidentCount
