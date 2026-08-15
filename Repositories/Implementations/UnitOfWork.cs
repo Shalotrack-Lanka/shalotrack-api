@@ -21,6 +21,7 @@ public class UnitOfWork : IUnitOfWork
     public IDeviceStatusRepository DeviceStatuses { get; }        // FIX -- was declared but never assigned (CS8618); constructor now takes and wires it, same pattern as every other repository here
     public IEmergencyContactRepository EmergencyContacts { get; }  // NEW
     public ISetupShalotrackDeviceRepository SetupShalotrackDevices { get; } // NEW
+    public ISavedPlaceRepository SavedPlaces { get; }
 
     public UnitOfWork(
         ShaloTrackDbContext context,
@@ -33,7 +34,8 @@ public class UnitOfWork : IUnitOfWork
         ISubscriptionRepository subscriptionRepository,           // NEW
         IDeviceStatusRepository deviceStatusRepository,           // FIX
         IEmergencyContactRepository emergencyContactRepository,   // NEW
-        ISetupShalotrackDeviceRepository setupShalotrackDeviceRepository) // NEW
+        ISetupShalotrackDeviceRepository setupShalotrackDeviceRepository,
+        ISavedPlaceRepository savedPlaces) // NEW
     {
         _context = context;
         Customers = customerRepository;
@@ -46,6 +48,7 @@ public class UnitOfWork : IUnitOfWork
         DeviceStatuses = deviceStatusRepository;                  // FIX
         EmergencyContacts = emergencyContactRepository;           // NEW
         SetupShalotrackDevices = setupShalotrackDeviceRepository; // NEW
+        SavedPlaces = savedPlaces;
     }
 
     public async Task<int> SaveChangesAsync()

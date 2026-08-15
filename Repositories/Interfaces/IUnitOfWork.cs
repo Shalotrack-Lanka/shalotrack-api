@@ -12,6 +12,7 @@ public interface IUnitOfWork
     IDeviceStatusRepository DeviceStatuses { get; }
     IEmergencyContactRepository EmergencyContacts { get; }   // NEW
     ISetupShalotrackDeviceRepository SetupShalotrackDevices { get; } // NEW
+    ISavedPlaceRepository SavedPlaces { get; }
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();

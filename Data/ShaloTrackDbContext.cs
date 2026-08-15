@@ -27,6 +27,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<Subscription> Subscriptions => Set<Subscription>();   // NEW
     public DbSet<EmergencyContact> EmergencyContacts => Set<EmergencyContact>();   // NEW
     public DbSet<SetupShalotrackDevice> SetupShalotrackDevices => Set<SetupShalotrackDevice>();   // NEW
+    public DbSet<SavedPlace> SavedPlaces => Set<SavedPlace>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -122,5 +123,10 @@ public class ShaloTrackDbContext : DbContext
         modelBuilder.Entity<SetupShalotrackDevice>()
             .HasIndex(d => d.ImeiNumber)
             .IsUnique();
+
+        modelBuilder.Entity<SavedPlace>()
+            .HasOne(p => p.Customer)
+            .WithMany()
+            .HasForeignKey(p => p.CustomerId);
     }
 }

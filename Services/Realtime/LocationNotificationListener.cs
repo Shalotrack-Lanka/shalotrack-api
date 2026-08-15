@@ -27,6 +27,15 @@ namespace ShaloTrack_API.Services.Realtime;
 ///   - Low-battery: from device_status_updates only, fires once per "below
 ///     threshold" episode (not on every single low reading).
 ///
+/// Place-visit detection (NEW): from location_updates only, same
+/// transition-detection shape as the alerts above -- ENTER is detected when
+/// a device moves from "not within any saved place's radius" to "within
+/// one", not on every ping while continuously parked there. Deliberately
+/// inline here, not queued to a background worker like Trip Archival is --
+/// unlike archival (S3 I/O, bulk deletes), a proximity check + counter
+/// increment is cheap and belongs with the other lightweight per-position
+/// derived-state checks already living in this class.
+///
 /// CRITICAL: RealtimeConnection MUST use the session pooler (port 5432), never
 /// the transaction pooler. See earlier setup notes.
 ///
@@ -37,6 +46,10 @@ namespace ShaloTrack_API.Services.Realtime;
 /// saw). Seeding reads via IDeviceStatusRepository directly, NOT IUnitOfWork --
 /// see Phase 2 postmortem for why (IUnitOfWork.DeviceStatuses was declared but
 /// never wired, null at runtime, took the whole listener down until fixed).
+/// Place-visit "nearby" state is NOT seeded on reconnect -- a missed exit/
+/// re-entry pair across a reconnect is a low-severity, self-correcting gap
+/// (the next real exit+entry cycle re-syncs it), not worth the extra
+/// complexity of persisting/reloading transient proximity state.
 ///
 /// Trip archival (Phase 3b): the moment IgnitionOff is detected -- from
 /// EITHER detection path below, not just one -- a TripCloseEvent is enqueued
@@ -188,6 +201,7 @@ public class LocationNotificationListener : BackgroundService
         if (data.DeviceId is not null)
         {
             await CheckLocationAlertsAsync(data);
+            await CheckPlaceVisitsAsync(data); // NEW
         }
     }
 
@@ -239,6 +253,83 @@ public class LocationNotificationListener : BackgroundService
             await PersistAlertsAsync(alertsToCreate, data.VehicleId!.Value);
         }
     }
+
+    // ---- place-visit detection (NEW) ----
+
+    // Same shape as CheckLocationAlertsAsync: in-memory per-device state,
+    // transition detected under lock, DB work done outside the lock. Only
+    // acts on ENTER transitions (newly within a place's radius), so a
+    // vehicle parked at a saved place for hours only counts as one visit,
+    // not one per GPS ping.
+    private async Task CheckPlaceVisitsAsync(LocationNotificationPayload data)
+    {
+        var deviceId = data.DeviceId!.Value;
+        var vehicleId = data.VehicleId!.Value;
+
+        using var scope = _scopeFactory.CreateScope();
+        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+        var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+        if (vehicle is null) return;
+
+        var places = await unitOfWork.SavedPlaces.GetByCustomerAsync(vehicle.CustomerId);
+        if (places.Count == 0) return;
+
+        var state = _deviceStates.GetOrAdd(deviceId, _ => new DeviceAlertState());
+
+        List<Guid> newlyEnteredPlaceIds;
+        lock (state)
+        {
+            var currentlyNearby = new HashSet<Guid>();
+            foreach (var place in places)
+            {
+                double distanceMeters = HaversineDistanceMeters(
+                    (double)data.Latitude, (double)data.Longitude,
+                    (double)place.Latitude, (double)place.Longitude);
+
+                if (distanceMeters <= place.RadiusMeters)
+                {
+                    currentlyNearby.Add(place.PlaceId);
+                }
+            }
+
+            newlyEnteredPlaceIds = currentlyNearby.Except(state.NearbyPlaceIds).ToList();
+            state.NearbyPlaceIds = currentlyNearby;
+        }
+
+        foreach (var placeId in newlyEnteredPlaceIds)
+        {
+            // Re-fetched individually (tracked, unlike the AsNoTracking list
+            // above) so this update is safe to save directly.
+            var trackedPlace = await unitOfWork.SavedPlaces.GetByIdAsync(placeId);
+            if (trackedPlace is null) continue;
+
+            trackedPlace.VisitCount += 1;
+            trackedPlace.LastVisitedAt = DateTime.UtcNow;
+        }
+
+        if (newlyEnteredPlaceIds.Count > 0)
+        {
+            await unitOfWork.SaveChangesAsync();
+            _logger.LogInformation(
+                "Recorded {Count} place visit(s) for vehicle {VehicleId}", newlyEnteredPlaceIds.Count, vehicleId);
+        }
+    }
+
+    // Standard great-circle distance between two lat/lng points, in meters.
+    private static double HaversineDistanceMeters(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double earthRadiusMeters = 6371000;
+        double dLat = ToRadians(lat2 - lat1);
+        double dLon = ToRadians(lon2 - lon1);
+        double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                   Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
+                   Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        return earthRadiusMeters * c;
+    }
+
+    private static double ToRadians(double degrees) => degrees * Math.PI / 180.0;
 
     // ---- device_status_updates ----
 
@@ -369,6 +460,11 @@ public class LocationNotificationListener : BackgroundService
         public bool IsSpeeding { get; set; }
         public bool? PowerStatus { get; set; }
         public bool IsLowBattery { get; set; }
+
+        // NEW -- which of this device's owner's saved places it was within
+        // radius of, as of the last check. Compared against the current
+        // check to detect ENTER transitions (see CheckPlaceVisitsAsync).
+        public HashSet<Guid> NearbyPlaceIds { get; set; } = new();
     }
 }
 
