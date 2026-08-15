@@ -22,6 +22,7 @@ public static class BusinessServiceExtensions
         services.AddScoped<IRoadSnappingService, RoadSnappingService>();   // NEW -- live trail road-snapping
         services.AddScoped<ISubscriptionService, SubscriptionService>();   // NEW -- subscription lifecycle
         services.AddScoped<ISavedPlaceService, SavedPlaceService>();
+        services.AddScoped<IVehicleStatsService, VehicleStatsService>();
         // Only implementation of IPaymentProvider today -- no payment
         // gateway merchant account yet. Swap/extend this line when a real
         // gateway (PayHere, etc.) is integrated; nothing else needs to

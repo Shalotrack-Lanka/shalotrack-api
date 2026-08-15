@@ -68,4 +68,15 @@ public class AlertRepository : IAlertRepository
                 && a.TriggeredAt > after
                 && a.TriggeredAt < before);
     }
+
+    // NEW -- for Value/stats.
+    public async Task<int> CountByVehicleAndTypeAsync(Guid vehicleId, AlertType alertType, DateTime from, DateTime to)
+    {
+        return await _context.Alerts
+            .AsNoTracking()
+            .CountAsync(a => a.VehicleId == vehicleId
+                && a.AlertType == alertType
+                && a.TriggeredAt >= from
+                && a.TriggeredAt <= to);
+    }
 }

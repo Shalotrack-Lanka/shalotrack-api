@@ -32,4 +32,9 @@ public interface IAlertRepository
     /// WP CAD 9934 test that swept 7 days of idle pings into one archive).
     /// </summary>
     Task<bool> ExistsByDeviceAndTypeBetweenAsync(Guid deviceId, AlertType alertType, DateTime after, DateTime before);
+
+    // NEW -- for Value/stats. Vehicle-scoped (not customer-scoped like
+    // GetByCustomerAsync) since VehicleStatsService already resolves and
+    // verifies ownership of the specific vehicle before calling this.
+    Task<int> CountByVehicleAndTypeAsync(Guid vehicleId, AlertType alertType, DateTime from, DateTime to);
 }
