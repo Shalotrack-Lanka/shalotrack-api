@@ -33,9 +33,16 @@ public class GpsDeviceRepository : IGpsDeviceRepository
 
     public async Task<GpsDevice?> GetByImeiAsync(string imei)
     {
+        // FIX: was an exact match with no trimming on either side. The
+        // Android client already trims its input, but the stored value
+        // itself could have leading/trailing whitespace from however it
+        // was originally inserted (e.g. a copy-pasted value in the Admin
+        // Portal). Trimming both sides here defensively closes that gap
+        // regardless of which side the whitespace actually came from.
+        string trimmedImei = imei.Trim();
         return await _context.GpsDevices
             .Include(d => d.DeviceAssignments) // to check the assignment status of the gps device
-            .FirstOrDefaultAsync(d => d.ImeiNumber == imei);
+            .FirstOrDefaultAsync(d => d.ImeiNumber.Trim() == trimmedImei);
     }
 
     public async Task<GpsDevice?> GetBySimNumberAsync(string simNumber)
