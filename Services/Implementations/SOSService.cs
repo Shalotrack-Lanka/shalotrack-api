@@ -131,15 +131,34 @@ public class SOSService : ISOSService
         _logger.LogWarning("SOS triggered for vehicle {VehicleId} ({VehicleNumber}) by customer {CustomerId}",
             vehicleId, vehicle.VehicleNumber, customer.CustomerId);
 
+        // FIX: this call was never wrapped, despite being flagged as a
+        // real risk earlier -- if SendAlertPushAsync throws for any
+        // reason, it would propagate as an unhandled exception and
+        // return a 500, even though the Alert and DeviceEvent above were
+        // already safely saved. Confirmed as the actual cause via real
+        // Logcat evidence ("triggerSOS failed, code 500") on a request
+        // that should have succeeded. A failed push is a real problem
+        // worth logging, but it must never make an already-successful
+        // safety-critical trigger report as failed.
+        //
         // Pushes to every one of the CUSTOMER'S OWN other registered
         // devices (existing SendAlertPushAsync already handles multiple
         // tokens/devices). Does NOT reach emergency contacts or shared
         // viewers -- that depends on Vehicle Sharing, explicitly deferred
         // to a later release, same as payment gateway integration.
-        await _pushNotificationService.SendAlertPushAsync(
-            customer.CustomerId,
-            "SOS Alert",
-            $"Emergency alert triggered for {vehicle.VehicleNumber}.");
+        try
+        {
+            await _pushNotificationService.SendAlertPushAsync(
+                customer.CustomerId,
+                "SOS Alert",
+                $"Emergency alert triggered for {vehicle.VehicleNumber}.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "SOS push notification failed for vehicle {VehicleId}, customer {CustomerId} -- the Alert and DeviceEvent were already saved successfully, this failure is push-delivery only.",
+                vehicleId, customer.CustomerId);
+        }
 
         return ApiResponse<string>.Ok("OK", "SOS triggered successfully.");
     }
