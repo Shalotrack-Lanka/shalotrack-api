@@ -89,6 +89,21 @@ public class ShaloTrackDbContext : DbContext
             .WithMany(r => r.DeviceEvents)
             .HasForeignKey(e => e.RawPacketId);
 
+        // FIX: DeviceEvents.Metadata is a real jsonb column in Postgres,
+        // but this mapping was never configured -- the Gateway (Python)
+        // has always written to this table directly and its own driver
+        // handles jsonb automatically, so this never surfaced until the
+        // C# API's own write path (added for SOS) tried inserting here
+        // for the first time. Without this, Npgsql sends the parameter
+        // as plain text and Postgres rejects it outright, even for a
+        // null value: "column \"Metadata\" is of type jsonb but
+        // expression is of type text" -- confirmed via the real
+        // exception, not assumed. This was the actual cause of SOS
+        // reporting a 500 despite everything else being correct.
+        modelBuilder.Entity<DeviceEvent>()
+            .Property(e => e.Metadata)
+            .HasColumnType("jsonb");
+
         modelBuilder.Entity<CustomerFcmToken>()
             .HasIndex(t => t.FcmToken)
             .IsUnique();
