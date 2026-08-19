@@ -3,6 +3,7 @@ using ShaloTrack_API.Data;
 using ShaloTrack_API.DTOs.Dashboard;
 using ShaloTrack_API.Models;
 using ShaloTrack_API.Repositories.Interfaces;
+using System.Linq;
 
 namespace ShaloTrack_API.Repositories.Implementations;
 
@@ -25,11 +26,26 @@ public class CustomerRepository : ICustomerRepository
     // person to already be a registered customer, resolving directly by
     // phone number at invite time avoids an unresolved/pending-identity
     // state entirely.
+    // FIX: was matching phoneNumber == stored value after only trimming
+    // whitespace -- but a real local-format input ("0703792673") and the
+    // stored international format from Firebase phone auth
+    // ("+94703792673") are entirely different strings, not just
+    // differently-whitespaced ones. Confirmed via a real database row
+    // during the actual "can't share vehicle" investigation.
+    //
+    // Both formats share the same last 9 digits (the Sri Lankan national
+    // significant number, excluding the leading 0 or +94 country code),
+    // so normalizing to that and matching the end of the stored value
+    // works regardless of which format someone types.
     public async Task<Customer?> GetByPhoneNumberAsync(string phoneNumber)
     {
-        string trimmed = phoneNumber.Trim();
+        string digitsOnly = new string(phoneNumber.Where(char.IsDigit).ToArray());
+        string last9 = digitsOnly.Length >= 9 ? digitsOnly.Substring(digitsOnly.Length - 9) : digitsOnly;
+
+        if (last9.Length == 0) return null;
+
         return await _context.Customers
-            .FirstOrDefaultAsync(c => c.PhoneNumber.Trim() == trimmed);
+            .FirstOrDefaultAsync(c => c.PhoneNumber.EndsWith(last9));
     }
 
     public async Task<List<Customer>> GetAllAsync()
