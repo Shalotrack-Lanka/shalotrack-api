@@ -29,4 +29,14 @@ public class VehicleResponseDto
     public bool HasGpsDevice { get; set; }
 
     public String? Imei { get; set; }
+
+    // NEW -- full GPS device details, requested explicitly for the
+    // redesigned Details screen. All null when HasGpsDevice is false.
+    public string? SimNumber { get; set; }
+    public string? DeviceModel { get; set; }
+    public string? NetworkProvider { get; set; }
+    public string? FirmwareVersion { get; set; }
+    public string? ActivationStatus { get; set; }
+    public DateTime? WarrantyExpiryDate { get; set; }
+    public DateTime? InstalledAt { get; set; }
 }

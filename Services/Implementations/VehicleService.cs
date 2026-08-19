@@ -339,7 +339,19 @@ public class VehicleService : IVehicleService
             VehicleType = vehicle.VehicleType,
             FuelType = vehicle.FuelType,
             HasGpsDevice = activeAssignment != null,
-            Imei = activeAssignment?.Device?.ImeiNumber   // NEW
+            Imei = activeAssignment?.Device?.ImeiNumber,   // NEW
+
+            // NEW -- full GPS device details, requested explicitly for
+            // the redesigned Details screen. ActivationStatus is an enum
+            // on the model -- ToString() gives a plain readable value
+            // ("Active", "Inactive", etc.) rather than the raw int.
+            SimNumber = activeAssignment?.Device?.SimNumber,
+            DeviceModel = activeAssignment?.Device?.DeviceModel,
+            NetworkProvider = activeAssignment?.Device?.NetworkProvider,
+            FirmwareVersion = activeAssignment?.Device?.FirmwareVersion,
+            ActivationStatus = activeAssignment?.Device?.ActivationStatus.ToString(),
+            WarrantyExpiryDate = activeAssignment?.Device?.WarrantyExpiryDate,
+            InstalledAt = activeAssignment?.Device?.InstalledAt
         };
     }
 }
