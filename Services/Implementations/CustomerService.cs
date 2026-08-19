@@ -6,6 +6,7 @@ using ShaloTrack_API.Repositories.Implementations;
 using ShaloTrack_API.Repositories.Interfaces;
 using ShaloTrack_API.Responses;
 using ShaloTrack_API.Services.Interfaces;
+using System.Linq;
 using System.Net;
 using ShaloTrack_API.Auth;
 
@@ -246,6 +247,42 @@ public class CustomerService : ICustomerService
                 404,
                 "Customer not found.");
         }
+
+        // NEW -- Vehicle Sharing. Merged in entirely after the owned-
+        // vehicle query above, which is left completely untouched --
+        // mapping shared vehicles into the exact same DashboardVehicleDto
+        // shape they already use, so Home/Vehicles tab display logic
+        // doesn't need to know or care whether a given entry is owned or
+        // shared. IsShared distinguishes them for action-gating
+        // (Android hides delete/edit/Immobilize for shared entries).
+        var onlineThreshold = DateTime.UtcNow.AddMinutes(-10);
+        var acceptedShares = await _unitOfWork.VehicleShares.GetSharedWithMeAsync(customerId);
+
+        foreach (var share in acceptedShares)
+        {
+            var v = share.Vehicle;
+            dashboard.Vehicles.Add(new DashboardVehicleDto
+            {
+                VehicleId = v.VehicleId,
+                VehicleNumber = v.VehicleNumber,
+                Make = v.Make,
+                Model = v.Model,
+                DeviceId = v.CurrentLocation != null ? v.CurrentLocation.DeviceId : (Guid?)null,
+                Latitude = v.CurrentLocation != null ? v.CurrentLocation.Latitude : (decimal?)null,
+                Longitude = v.CurrentLocation != null ? v.CurrentLocation.Longitude : (decimal?)null,
+                Speed = v.CurrentLocation != null ? v.CurrentLocation.Speed : 0,
+                Heading = v.CurrentLocation != null ? v.CurrentLocation.Heading : 0,
+                Online = v.CurrentLocation != null && v.CurrentLocation.LastUpdate >= onlineThreshold,
+                Ignition = v.CurrentLocation != null && v.CurrentLocation.IgnitionStatus,
+                LastUpdate = v.CurrentLocation != null ? v.CurrentLocation.LastUpdate : (DateTime?)null,
+                IsShared = true,
+                OwnerName = share.OwnerCustomer.FullName
+            });
+        }
+
+        dashboard.VehicleCount = dashboard.Vehicles.Count;
+        dashboard.OnlineVehicles = dashboard.Vehicles.Count(v => v.Online);
+        dashboard.OfflineVehicles = dashboard.VehicleCount - dashboard.OnlineVehicles;
 
         return ApiResponse<DashboardResponseDto>.Ok(
             dashboard,

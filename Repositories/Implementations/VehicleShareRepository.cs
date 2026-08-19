@@ -59,6 +59,7 @@ public class VehicleShareRepository : IVehicleShareRepository
         return await _context.VehicleShares
             .AsNoTracking()
             .Include(s => s.Vehicle)
+                .ThenInclude(v => v.CurrentLocation) // NEW -- needed to merge into the dashboard with live location data
             .Include(s => s.OwnerCustomer)
             .Where(s => s.SharedWithCustomerId == sharedWithCustomerId && s.Status == VehicleShareStatus.Accepted)
             .OrderByDescending(s => s.RespondedAt)

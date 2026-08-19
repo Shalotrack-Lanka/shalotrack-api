@@ -143,9 +143,13 @@ public class SOSService : ISOSService
         //
         // Pushes to every one of the CUSTOMER'S OWN other registered
         // devices (existing SendAlertPushAsync already handles multiple
-        // tokens/devices). Does NOT reach emergency contacts or shared
-        // viewers -- that depends on Vehicle Sharing, explicitly deferred
-        // to a later release, same as payment gateway integration.
+        // tokens/devices), plus every customer with an Accepted share
+        // for this vehicle -- Vehicle Sharing has since been built, this
+        // is the actual reason it was requested in the first place
+        // ("the other party must be able to receive those messages").
+        // Does not reach Emergency Contacts specifically -- those are
+        // phone numbers, not app accounts, and are already surfaced
+        // separately via the post-SOS call sheet.
         try
         {
             await _pushNotificationService.SendAlertPushAsync(
@@ -158,6 +162,24 @@ public class SOSService : ISOSService
             _logger.LogError(ex,
                 "SOS push notification failed for vehicle {VehicleId}, customer {CustomerId} -- the Alert and DeviceEvent were already saved successfully, this failure is push-delivery only.",
                 vehicleId, customer.CustomerId);
+        }
+
+        var acceptedShares = await _unitOfWork.VehicleShares.GetAcceptedSharesForVehicleAsync(vehicleId);
+        foreach (var share in acceptedShares)
+        {
+            try
+            {
+                await _pushNotificationService.SendAlertPushAsync(
+                    share.SharedWithCustomerId,
+                    "SOS Alert",
+                    $"Emergency alert triggered for {vehicle.VehicleNumber}.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "SOS push notification failed for shared viewer {CustomerId}, vehicle {VehicleId} -- the Alert and DeviceEvent were already saved successfully, this failure is push-delivery only.",
+                    share.SharedWithCustomerId, vehicleId);
+            }
         }
 
         return ApiResponse<string>.Ok("OK", "SOS triggered successfully.");

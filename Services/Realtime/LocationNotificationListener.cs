@@ -427,12 +427,43 @@ public class LocationNotificationListener : BackgroundService
         }
 
         var pushService = scope.ServiceProvider.GetRequiredService<IPushNotificationService>();
+
+        // NEW -- Vehicle Sharing. Alerts now also reach every customer
+        // with an Accepted share for this vehicle, not just the owner.
+        // Resolved once per vehicle (not per alert) since the share list
+        // doesn't change between alerts in the same batch.
+        var acceptedShares = await unitOfWork.VehicleShares.GetAcceptedSharesForVehicleAsync(vehicleId);
+
         foreach (var alert in alerts)
         {
-            await pushService.SendAlertPushAsync(
-                vehicle.CustomerId,
-                $"{vehicle.VehicleNumber}: {alert.AlertType}",
-                alert.Message);
+            string title = $"{vehicle.VehicleNumber}: {alert.AlertType}";
+
+            // FIX: this call was never wrapped -- if it throws for any
+            // reason, the exception would propagate up through this
+            // background listener with unclear consequences, even though
+            // the alert itself was already successfully persisted above.
+            // Same lesson as the real SOS 500 incident: a push failure
+            // must never risk an already-successful core action.
+            try
+            {
+                await pushService.SendAlertPushAsync(vehicle.CustomerId, title, alert.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Alert push failed for owner {CustomerId}, vehicle {VehicleId} -- alert was already persisted.", vehicle.CustomerId, vehicleId);
+            }
+
+            foreach (var share in acceptedShares)
+            {
+                try
+                {
+                    await pushService.SendAlertPushAsync(share.SharedWithCustomerId, title, alert.Message);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Alert push failed for shared viewer {CustomerId}, vehicle {VehicleId} -- alert was already persisted.", share.SharedWithCustomerId, vehicleId);
+                }
+            }
         }
     }
 
