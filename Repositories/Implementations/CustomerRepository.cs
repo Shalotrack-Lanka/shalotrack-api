@@ -21,6 +21,17 @@ public class CustomerRepository : ICustomerRepository
             .FirstOrDefaultAsync(c => c.FirebaseUid == firebaseUid);
     }
 
+    // NEW -- for Vehicle Sharing. Since sharing requires the invited
+    // person to already be a registered customer, resolving directly by
+    // phone number at invite time avoids an unresolved/pending-identity
+    // state entirely.
+    public async Task<Customer?> GetByPhoneNumberAsync(string phoneNumber)
+    {
+        string trimmed = phoneNumber.Trim();
+        return await _context.Customers
+            .FirstOrDefaultAsync(c => c.PhoneNumber.Trim() == trimmed);
+    }
+
     public async Task<List<Customer>> GetAllAsync()
     {
         return await _context.Customers

@@ -28,6 +28,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<EmergencyContact> EmergencyContacts => Set<EmergencyContact>();   // NEW
     public DbSet<SetupShalotrackDevice> SetupShalotrackDevices => Set<SetupShalotrackDevice>();   // NEW
     public DbSet<SavedPlace> SavedPlaces => Set<SavedPlace>();
+    public DbSet<VehicleShare> VehicleShares => Set<VehicleShare>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -143,5 +144,27 @@ public class ShaloTrackDbContext : DbContext
             .HasOne(p => p.Customer)
             .WithMany()
             .HasForeignKey(p => p.CustomerId);
+
+        // NEW -- Vehicle Sharing. Two FKs here point to the same Customer
+        // table (owner and shared-with) -- Restrict on both avoids EF
+        // Core trying to create two cascade-delete paths from Customer,
+        // which most databases reject outright as a conflict.
+        modelBuilder.Entity<VehicleShare>()
+            .HasOne(s => s.Vehicle)
+            .WithMany()
+            .HasForeignKey(s => s.VehicleId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<VehicleShare>()
+            .HasOne(s => s.OwnerCustomer)
+            .WithMany()
+            .HasForeignKey(s => s.OwnerCustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<VehicleShare>()
+            .HasOne(s => s.SharedWithCustomer)
+            .WithMany()
+            .HasForeignKey(s => s.SharedWithCustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

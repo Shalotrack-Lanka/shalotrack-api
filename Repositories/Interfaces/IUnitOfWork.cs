@@ -13,6 +13,7 @@ public interface IUnitOfWork
     IEmergencyContactRepository EmergencyContacts { get; }   // NEW
     ISetupShalotrackDeviceRepository SetupShalotrackDevices { get; } // NEW
     ISavedPlaceRepository SavedPlaces { get; }
+    IVehicleShareRepository VehicleShares { get; }
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();

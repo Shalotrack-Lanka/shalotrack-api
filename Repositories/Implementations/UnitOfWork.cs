@@ -22,6 +22,7 @@ public class UnitOfWork : IUnitOfWork
     public IEmergencyContactRepository EmergencyContacts { get; }  // NEW
     public ISetupShalotrackDeviceRepository SetupShalotrackDevices { get; } // NEW
     public ISavedPlaceRepository SavedPlaces { get; }
+    public IVehicleShareRepository VehicleShares { get; }
 
     public UnitOfWork(
         ShaloTrackDbContext context,
@@ -35,7 +36,8 @@ public class UnitOfWork : IUnitOfWork
         IDeviceStatusRepository deviceStatusRepository,           // FIX
         IEmergencyContactRepository emergencyContactRepository,   // NEW
         ISetupShalotrackDeviceRepository setupShalotrackDeviceRepository,
-        ISavedPlaceRepository savedPlaces) // NEW
+        ISavedPlaceRepository savedPlaces,
+        IVehicleShareRepository vehicleShares) // NEW
     {
         _context = context;
         Customers = customerRepository;
@@ -49,6 +51,7 @@ public class UnitOfWork : IUnitOfWork
         EmergencyContacts = emergencyContactRepository;           // NEW
         SetupShalotrackDevices = setupShalotrackDeviceRepository; // NEW
         SavedPlaces = savedPlaces;
+        VehicleShares = vehicleShares;
     }
 
     public async Task<int> SaveChangesAsync()
