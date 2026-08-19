@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.CurrentLocation;
+using ShaloTrack_API.Enums;
 using ShaloTrack_API.Repositories.Interfaces;
 using ShaloTrack_API.Responses;
 using ShaloTrack_API.Services.Interfaces;
@@ -59,12 +60,29 @@ public class CurrentLocationService : ICurrentLocationService
         return ApiResponse<CurrentLocationResponseDto>.Ok(location, "Current location retrieved successfully.");
     }
 
+    // FIX: was owner-or-staff only, which is exactly why a shared viewer
+    // got rejected here even after accepting a share -- this endpoint
+    // never knew Vehicle Sharing existed. Now also allows access if the
+    // requesting customer has an Accepted (not Pending) share for this
+    // specific vehicle, matching the "full access" decision already made
+    // for what a shared viewer gets.
     private async Task<bool> OwnsVehicleAsync(Guid vehicleId)
     {
         if (_currentUser.IsStaff) return true;
+
         var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
-        return vehicle is not null &&
-               string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+        if (vehicle is null) return false;
+
+        if (string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(_currentUser.FirebaseUid ?? string.Empty);
+        if (customer is null) return false;
+
+        var share = await _unitOfWork.VehicleShares.GetByVehicleAndSharedWithAsync(vehicleId, customer.CustomerId);
+        return share is not null && share.Status == VehicleShareStatus.Accepted;
     }
 
     private static ApiResponse<CurrentLocationResponseDto> NotFound() =>
