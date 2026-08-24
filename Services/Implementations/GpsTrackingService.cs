@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.GpsTracking;
+using ShaloTrack_API.Enums;
 using ShaloTrack_API.Filters;
 using ShaloTrack_API.Repositories.Interfaces;
 using ShaloTrack_API.Responses;
@@ -39,14 +40,32 @@ public class GpsTrackingService : IGpsTrackingService
         if (!_currentUser.IsStaff)
         {
             var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(filter.VehicleId.Value);
-            if (vehicle is null ||
-                !string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
+            bool isOwner = vehicle is not null &&
+                string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+
+            // FIX: was owner-or-staff only -- a shared viewer got rejected
+            // here even after accepting a share, same real bug already
+            // found and fixed in CurrentLocationService. Confirmed via
+            // real screenshots ("Couldn't load trips (code 404)" and a
+            // trail that wasn't snapping to roads because this endpoint
+            // couldn't even return the raw points).
+            bool hasAcceptedShare = false;
+            if (!isOwner && vehicle is not null)
+            {
+                var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(_currentUser.FirebaseUid ?? string.Empty);
+                if (customer is not null)
+                {
+                    var share = await _unitOfWork.VehicleShares.GetByVehicleAndSharedWithAsync(filter.VehicleId.Value, customer.CustomerId);
+                    hasAcceptedShare = share is not null && share.Status == VehicleShareStatus.Accepted;
+                }
+            }
+
+            if (!isOwner && !hasAcceptedShare)
             {
                 return ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>.Fail(
                     (int)HttpStatusCode.NotFound,
                     "Vehicle not found.",
-                    $"No vehicle exists with ID '{filter.VehicleId.Value}'."
-                );
+                    $"No vehicle exists with ID '{filter.VehicleId.Value}'.");
             }
         }
 
@@ -94,14 +113,29 @@ public class GpsTrackingService : IGpsTrackingService
         if (!_currentUser.IsStaff)
         {
             var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
-            if (vehicle is null ||
-                !string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
+            bool isOwner = vehicle is not null &&
+                string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+
+            // Same fix as GetAsync above -- this is the actual source of
+            // the real "Couldn't load trips (code 404)" error confirmed
+            // via screenshot for a shared vehicle.
+            bool hasAcceptedShare = false;
+            if (!isOwner && vehicle is not null)
+            {
+                var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(_currentUser.FirebaseUid ?? string.Empty);
+                if (customer is not null)
+                {
+                    var share = await _unitOfWork.VehicleShares.GetByVehicleAndSharedWithAsync(vehicleId, customer.CustomerId);
+                    hasAcceptedShare = share is not null && share.Status == VehicleShareStatus.Accepted;
+                }
+            }
+
+            if (!isOwner && !hasAcceptedShare)
             {
                 return ApiResponse<TripsReportResponseDto>.Fail(
                     (int)HttpStatusCode.NotFound,
                     "Vehicle not found.",
-                    $"No vehicle exists with ID '{vehicleId}'."
-                );
+                    $"No vehicle exists with ID '{vehicleId}'.");
             }
         }
 

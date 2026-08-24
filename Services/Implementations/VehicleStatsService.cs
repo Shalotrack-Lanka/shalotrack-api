@@ -47,7 +47,23 @@ public class VehicleStatsService : IVehicleStatsService
         }
 
         var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
-        if (vehicle is null || (!_currentUser.IsStaff && vehicle.CustomerId != customer.CustomerId))
+        if (vehicle is null)
+        {
+            return ApiResponse<VehicleStatsResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'.");
+        }
+
+        // FIX: was owner-or-staff only -- confirmed as the real cause of
+        // the Value screen not loading for a shared vehicle.
+        bool isOwner = vehicle.CustomerId == customer.CustomerId;
+        bool hasAcceptedShare = false;
+        if (!_currentUser.IsStaff && !isOwner)
+        {
+            var share = await _unitOfWork.VehicleShares.GetByVehicleAndSharedWithAsync(vehicleId, customer.CustomerId);
+            hasAcceptedShare = share is not null && share.Status == VehicleShareStatus.Accepted;
+        }
+
+        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare)
         {
             return ApiResponse<VehicleStatsResponseDto>.Fail(
                 (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'.");

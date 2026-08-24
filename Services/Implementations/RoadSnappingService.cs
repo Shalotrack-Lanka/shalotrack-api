@@ -2,6 +2,7 @@
 using System.Text.Json;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.Vehicle;
+using ShaloTrack_API.Enums;
 using ShaloTrack_API.Repositories.Interfaces;
 using ShaloTrack_API.Responses;
 using ShaloTrack_API.Services.Interfaces;
@@ -57,8 +58,26 @@ public class RoadSnappingService : IRoadSnappingService
                 $"No vehicle exists with ID '{vehicleId}'.");
         }
 
-        if (!_currentUser.IsStaff &&
-            !string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
+        bool isOwner = string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+
+        // FIX: was owner-or-staff only -- confirmed as the real cause of
+        // the "not snapping to road" complaint for a shared vehicle. The
+        // raw trail was rendering because GpsTrackingService returns the
+        // unsnapped points, but this endpoint (the actual road-snapping
+        // step) rejected the shared viewer, so it never got the snapped
+        // version at all.
+        bool hasAcceptedShare = false;
+        if (!_currentUser.IsStaff && !isOwner)
+        {
+            var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(_currentUser.FirebaseUid ?? string.Empty);
+            if (customer is not null)
+            {
+                var share = await _unitOfWork.VehicleShares.GetByVehicleAndSharedWithAsync(vehicleId, customer.CustomerId);
+                hasAcceptedShare = share is not null && share.Status == VehicleShareStatus.Accepted;
+            }
+        }
+
+        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare)
         {
             return ApiResponse<IReadOnlyList<SnappedPointDto>>.Fail(
                 (int)HttpStatusCode.NotFound,

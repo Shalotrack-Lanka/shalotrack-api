@@ -49,8 +49,28 @@ public class VehicleService : IVehicleService
 
         //vehicle.customer is already included
 
-        if (!_currentUser.IsStaff &&
-        !string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
+        bool isOwner = string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+
+        // FIX: was owner-or-staff only -- confirmed as the real cause of
+        // "Vehicle details not loaded yet" for a shared vehicle. The
+        // Android side's own vehicle-details fetch (getVehiclesByCustomer)
+        // only ever returns owned vehicles by design, so a shared viewer
+        // needs a genuinely different path to the same rich data -- this
+        // single-vehicle GetByIdAsync endpoint already returns the exact
+        // same VehicleResponseDto shape, it just needed the same
+        // shared-viewer allowance already applied elsewhere.
+        bool hasAcceptedShare = false;
+        if (!_currentUser.IsStaff && !isOwner)
+        {
+            var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(_currentUser.FirebaseUid ?? string.Empty);
+            if (customer is not null)
+            {
+                var share = await _unitOfWork.VehicleShares.GetByVehicleAndSharedWithAsync(vehicleId, customer.CustomerId);
+                hasAcceptedShare = share is not null && share.Status == VehicleShareStatus.Accepted;
+            }
+        }
+
+        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare)
         {
             return ApiResponse<VehicleResponseDto>.Fail(
                 (int)HttpStatusCode.NotFound, "Vehicle not found.",
