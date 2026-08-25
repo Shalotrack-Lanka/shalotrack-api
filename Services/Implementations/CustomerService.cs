@@ -267,6 +267,7 @@ public class CustomerService : ICustomerService
                 VehicleNumber = v.VehicleNumber,
                 Make = v.Make,
                 Model = v.Model,
+                VehicleType = v.VehicleType,
                 DeviceId = v.CurrentLocation != null ? v.CurrentLocation.DeviceId : (Guid?)null,
                 Latitude = v.CurrentLocation != null ? v.CurrentLocation.Latitude : (decimal?)null,
                 Longitude = v.CurrentLocation != null ? v.CurrentLocation.Longitude : (decimal?)null,

@@ -6,6 +6,11 @@ public class DashboardVehicleDto
     public string VehicleNumber { get; set; } = string.Empty;
     public string Make { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
+
+    // NEW -- needed so the Android list rows and map marker can show a
+    // type-specific icon (car/SUV/van/truck/bike/tuk) instead of one
+    // generic icon for every vehicle.
+    public string? VehicleType { get; set; }
     public Guid? DeviceId { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }

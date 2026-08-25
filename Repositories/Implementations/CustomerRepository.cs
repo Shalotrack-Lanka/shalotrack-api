@@ -119,6 +119,7 @@ public class CustomerRepository : ICustomerRepository
                         VehicleNumber = v.VehicleNumber,
                         Make = v.Make,
                         Model = v.Model,
+                        VehicleType = v.VehicleType,
                         // FIX: these five were hardcoded to null/0/false before.
                         // Now pulled from the real CurrentLocation nav property.
                         DeviceId = v.CurrentLocation != null ? v.CurrentLocation.DeviceId : (Guid?)null,
