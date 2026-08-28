@@ -32,6 +32,7 @@ public static class BusinessServiceExtensions
         services.AddScoped<ISetupShalotrackDeviceService, SetupShalotrackDeviceService>(); // NEW
         services.AddScoped<ISOSService, SOSService>();
         services.AddScoped<IVehicleShareService, VehicleShareService>();
+        services.AddScoped<IDeviceCommandService, DeviceCommandService>();
         return services;
     }
 }

@@ -28,16 +28,10 @@ builder.Services.AddRepositoryServices();
 builder.Services.AddBusinessServices();
 
 // ---- GPS TRIP ARCHIVAL (Phase 3a) ----
-// S3 write only, no delete permission granted at the IAM level.
 builder.Services.AddAwsServices();
 builder.Services.AddScoped<ITripArchivalService, TripArchivalService>();
 
-// ---- GPS TRIP ARCHIVAL -- ARCHIVE-THEN-PURGE PIPELINE (NEW -- Phase 3b) ----
-// Queue is a singleton (one instance shared for the whole app's lifetime,
-// bridging the NOTIFY handler thread and the background worker). The purge
-// service and its worker are scoped/hosted respectively -- see
-// TripArchivalQueueWorker and TripPurgeService for why each item gets its
-// own DI scope.
+// ---- GPS TRIP ARCHIVAL -- ARCHIVE-THEN-PURGE PIPELINE (Phase 3b) ----
 builder.Services.AddSingleton<ITripCloseEventQueue, TripCloseEventQueue>();
 builder.Services.AddScoped<ITripPurgeService, TripPurgeService>();
 builder.Services.AddHostedService<TripArchivalQueueWorker>();
@@ -46,7 +40,7 @@ builder.Services.AddHostedService<TripArchivalQueueWorker>();
 builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();
 
-// ---- AUTH (was entirely missing) ----
+// ---- AUTH ----
 var firebaseProjectId = builder.Configuration["Firebase:ProjectId"]
     ?? throw new InvalidOperationException("Firebase:ProjectId is not configured.");
 
@@ -65,10 +59,6 @@ builder.Services
             ClockSkew = TimeSpan.FromMinutes(2)
         };
 
-        // NEW -- SignalR's WebSocket transport can't set an Authorization header,
-        // so its clients send the token as a query string parameter instead. Only
-        // applies to /hubs/* paths -- normal REST routes still require a proper
-        // Authorization header.
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -98,7 +88,7 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<LocationNotificationListener>();
 
-// ---- FCM PUSH (NEW) ----
+// ---- FCM PUSH ----
 var firebaseServiceAccountJson = builder.Configuration["Firebase:ServiceAccountJson"]
     ?? throw new InvalidOperationException(
         "Firebase:ServiceAccountJson is not configured. This must be the full " +
@@ -107,18 +97,6 @@ var firebaseServiceAccountJson = builder.Configuration["Firebase:ServiceAccountJ
 
 FirebaseApp.Create(new AppOptions
 {
-    // FIX: CredentialFactory.FromJson<ServiceAccountCredential>() -- unlike
-    // the old (deprecated) GoogleCredential.FromJson(), which Firebase
-    // Admin SDK scopes internally -- produces a credential with NO OAuth
-    // scope attached at all unless one is explicitly set. The app still
-    // boots fine and the credential still looks valid, but every actual
-    // call to Google's messaging API gets silently rejected for lacking
-    // permission. This is the real cause of FCM push breaking after the
-    // CredentialFactory migration (confirmed against the actual timeline:
-    // worked before that change, stopped right after).
-    //
-    // CreateScoped() lives on GoogleCredential, not ServiceAccountCredential
-    // -- it has to come AFTER ToGoogleCredential() in this chain, not before.
     Credential = CredentialFactory.FromJson<ServiceAccountCredential>(firebaseServiceAccountJson)
                                   .ToGoogleCredential()
                                   .CreateScoped("https://www.googleapis.com/auth/firebase.messaging")
@@ -126,19 +104,21 @@ FirebaseApp.Create(new AppOptions
 
 builder.Services.AddScoped<IPushNotificationService, PushNotificationService>();
 
-// ---- ROAD SNAPPING (NEW) ----
-// Fail-fast at startup, matching the Firebase:ServiceAccountJson pattern
-// above -- a missing key should crash the app at boot, not surface as a
-// silent 500 on the first live snap-to-road request. Deliberately a
-// SEPARATE key from the Android app's own Maps SDK key: that one is
-// Android-app-restricted and rejects these server-side calls, and this
-// key must never be sent to the Android app at all regardless.
+// ---- ROAD SNAPPING ----
 _ = builder.Configuration["GoogleMaps:RoadsApiKey"]
     ?? throw new InvalidOperationException(
         "GoogleMaps:RoadsApiKey is not configured. Must be injected via the " +
         "GoogleMaps__RoadsApiKey environment variable, sourced from AWS SSM.");
 
 builder.Services.AddHttpClient("GoogleRoadsApi", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+
+// ---- GATEWAY COMMAND API ----
+// Internal VPC HTTP client for forwarding device commands to the Python gateway.
+// Timeout: 10s — commands must complete within this window or are treated as failed.
+builder.Services.AddHttpClient("GatewayCommandClient", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
 });
@@ -151,7 +131,6 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing
         .AddAspNetCoreInstrumentation(options =>
         {
-            // Don't let ALB health-check pings flood your traces every 30s
             options.Filter = httpContext => httpContext.Request.Path != "/health";
         })
         .AddHttpClientInstrumentation()
@@ -199,7 +178,6 @@ app.UseExceptionHandler(exceptionHandlerApp =>
         var isTimeout = exception?.Message.Contains("Timeout") == true
                         || exception?.InnerException?.Message.Contains("Timeout") == true;
 
-        // FIX: only expose internal error text in Development.
         string? detailed = app.Environment.IsDevelopment()
             ? (exception?.InnerException?.Message ?? exception?.Message)
             : null;
@@ -231,17 +209,8 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerDocumentation();
 }
 
-// Re-enable once ALB TLS is confirmed:
-// app.UseHttpsRedirection();
-
-// Interim fix (2026-07-15): lets the Laravel Admin sync job call
-// /api/internal/customers-sync with a shared key instead of a Firebase token.
-// Must run before UseAuthentication() or Firebase blocks it first.
-// TODO: replace with a Firebase service-account token (see chat) and remove this
-// once the key is moved to AWS SSM + the route is restricted to VPC-internal traffic.
 app.UseMiddleware<AdminSyncKeyMiddleware>();
 
-// ORDER MATTERS: authentication before authorization.
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -250,7 +219,6 @@ app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = Dat
 
 app.MapControllers();
 
-// NEW -- the real-time push endpoint. Android clients connect here after login.
 app.MapHub<LocationHub>("/hubs/location");
 
 app.Run();
