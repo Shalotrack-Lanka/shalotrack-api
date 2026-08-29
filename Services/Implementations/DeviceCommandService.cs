@@ -15,6 +15,20 @@ public class DeviceCommandService : IDeviceCommandService
     private readonly ILogger<DeviceCommandService> _logger;
     private readonly string _gatewayCommandApiUrl;
 
+    // -----------------------------------------------------------------------
+    // Command allowlist
+    //
+    // SECURITY: Only these commands can be sent by authenticated customers.
+    //
+    // Intentionally excluded:
+    //   relay_off — engine cut. Safety-critical. Requires explicit speed-
+    //               threshold spec and client approval before enabling.
+    //   reset     — device reboot. Can cause GPS data gaps. Staff only.
+    //   server    — changes server IP. Could redirect device to attacker.
+    //   apn       — changes SIM APN. Could disconnect device permanently.
+    //
+    // relay_on is included — it RESTORES the engine relay (safe operation).
+    // -----------------------------------------------------------------------
     private static readonly HashSet<string> CustomerAllowedCommands = new(StringComparer.OrdinalIgnoreCase)
     {
         "where",
@@ -56,9 +70,10 @@ public class DeviceCommandService : IDeviceCommandService
         _uow = uow;
         _httpClient = httpClientFactory.CreateClient("GatewayCommandClient");
         _logger = logger;
+
+        // Use DNS name — survives instance replacements without hardcoded IPs
         _gatewayCommandApiUrl = configuration["Gateway:CommandApiUrl"]
-            ?? throw new InvalidOperationException(
-                "Gateway:CommandApiUrl is not configured. Add it to appsettings or SSM.");
+            ?? "http://gateway.shalotrack.internal:8001";
     }
 
     public async Task<ApiResponse<DeviceCommandResponseDto>> SendCommandAsync(
@@ -101,6 +116,9 @@ public class DeviceCommandService : IDeviceCommandService
             var rateLimitKey = $"{customer.CustomerId}:{vehicleId}";
             if (!IsWithinRateLimit(rateLimitKey))
             {
+                _logger.LogWarning(
+                    "Rate limit exceeded for customer {CustomerId} on vehicle {VehicleId}",
+                    customer.CustomerId, vehicleId);
                 return ApiResponse<DeviceCommandResponseDto>.Fail(429,
                     $"Too many commands. Maximum {MaxCommandsPerMinute} per minute per vehicle.");
             }
@@ -118,7 +136,7 @@ public class DeviceCommandService : IDeviceCommandService
         if (string.IsNullOrWhiteSpace(imei))
             return ApiResponse<DeviceCommandResponseDto>.Fail(500, "Device IMEI is not set.");
 
-        // Step 5 — Forward to gateway command API
+        // Step 5 — Forward to gateway command API (internal VPC only)
         try
         {
             var payload = new
