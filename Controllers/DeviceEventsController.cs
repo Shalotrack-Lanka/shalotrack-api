@@ -20,9 +20,10 @@ public class DeviceEventsController : ControllerBase
 
     /// <summary>
     /// Retrieve device events with optional filtering.
-    /// NOTE: the DeviceEventFilter should be scoped to the caller's own vehicles/devices
-    /// for non-staff. Add an ownership check in DeviceEventService if this endpoint is
-    /// exposed to the customer app, otherwise a customer could filter to another's device.
+    /// FIXED: this previously had no ownership validation at all -- flagged
+    /// here as a known risk but never actually addressed until a systematic
+    /// security audit found it. DeviceEventService now requires non-staff
+    /// callers to specify VehicleId and validates they own it.
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> Get(

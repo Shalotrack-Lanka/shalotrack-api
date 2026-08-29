@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.DeviceAssignment;
 using ShaloTrack_API.Enums;
 using ShaloTrack_API.Models;
@@ -11,10 +12,12 @@ namespace ShaloTrack_API.Services.Implementations;
 public class DeviceAssignmentService : IDeviceAssignmentService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUser _currentUser;
 
-    public DeviceAssignmentService(IUnitOfWork unitOfWork)
+    public DeviceAssignmentService(IUnitOfWork unitOfWork, ICurrentUser currentUser)
     {
         _unitOfWork = unitOfWork;
+        _currentUser = currentUser;
     }
 
     public async Task<ApiResponse<IReadOnlyList<DeviceAssignmentResponseDto>>> GetAllAsync()
@@ -89,8 +92,30 @@ public class DeviceAssignmentService : IDeviceAssignmentService
 
     public async Task<ApiResponse<DeviceAssignmentResponseDto>> AssignAsync(CreateDeviceAssignmentDto dto)
     {
-        if (!await _unitOfWork.Vehicles.ExistsAsync(dto.VehicleId))
+        // FIX: real security gap found during the Link Vehicle
+        // investigation -- this had zero ownership validation at all.
+        // Any authenticated customer could assign any GPS device to any
+        // vehicle, not just their own. Owner-only, matching the same
+        // boundary already established for other structural vehicle
+        // changes (edit, delete, Immobilize) -- linking/unlinking a
+        // device isn't part of what a shared viewer's "full access" was
+        // ever scoped to include.
+        var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(dto.VehicleId);
+        if (vehicle is null)
         {
+            return ApiResponse<DeviceAssignmentResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound,
+                "Vehicle not found.",
+                "The specified vehicle does not exist."
+            );
+        }
+
+        bool isOwner = string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+        if (!_currentUser.IsStaff && !isOwner)
+        {
+            // Same "vehicle not found" response as the missing-vehicle
+            // case above, not a 403 -- doesn't confirm to an unauthorized
+            // caller that this vehicle exists at all.
             return ApiResponse<DeviceAssignmentResponseDto>.Fail(
                 (int)HttpStatusCode.NotFound,
                 "Vehicle not found.",
@@ -202,6 +227,20 @@ public class DeviceAssignmentService : IDeviceAssignmentService
                 (int)HttpStatusCode.BadRequest,
                 "Already removed.",
                 "This assignment has already been removed."
+            );
+        }
+
+        // FIX: same real security gap as AssignAsync -- no ownership
+        // validation at all. Owner-only, same reasoning as above.
+        var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(assignment.VehicleId);
+        bool isOwner = vehicle is not null &&
+            string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+        if (!_currentUser.IsStaff && !isOwner)
+        {
+            return ApiResponse<string>.Fail(
+                (int)HttpStatusCode.NotFound,
+                "Assignment not found.",
+                "The specified assignment does not exist."
             );
         }
 

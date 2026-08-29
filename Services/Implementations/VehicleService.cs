@@ -120,6 +120,26 @@ public class VehicleService : IVehicleService
             );
         }
 
+        // FIX: severe gap found during a systematic security audit -- the
+        // controller's own XML comment falsely claimed "Ownership of
+        // dto.CustomerId is enforced in the service," but this only ever
+        // checked that the CustomerId existed at all, never that it
+        // belonged to the caller. Any authenticated customer could create
+        // a vehicle record under any other customer's account simply by
+        // passing their CustomerId in the request body.
+        if (!_currentUser.IsStaff)
+        {
+            var callingCustomer = await _unitOfWork.Customers.GetByFirebaseUidAsync(_currentUser.FirebaseUid ?? string.Empty);
+            if (callingCustomer is null || callingCustomer.CustomerId != dto.CustomerId)
+            {
+                return ApiResponse<VehicleResponseDto>.Fail(
+                    (int)HttpStatusCode.Forbidden,
+                    "Not authorized.",
+                    "You can only create vehicles under your own account."
+                );
+            }
+        }
+
         if (await _unitOfWork.Vehicles.GetByVehicleNumberAsync(dto.VehicleNumber) is not null)
         {
             return ApiResponse<VehicleResponseDto>.Fail(
@@ -189,6 +209,22 @@ public class VehicleService : IVehicleService
         var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
 
         if (vehicle is null)
+        {
+            return ApiResponse<VehicleResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound,
+                "Vehicle not found.",
+                "The specified vehicle does not exist."
+            );
+        }
+
+        // FIX: severe gap found during a systematic security audit -- this
+        // method had zero ownership validation at all. Any authenticated
+        // customer could update any other customer's vehicle details
+        // (make, model, color, vehicle number, chassis/engine number)
+        // simply by knowing or guessing a vehicleId. Same owner-or-staff
+        // pattern used consistently everywhere else in this API.
+        if (!_currentUser.IsStaff &&
+            !string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
         {
             return ApiResponse<VehicleResponseDto>.Fail(
                 (int)HttpStatusCode.NotFound,
@@ -267,6 +303,22 @@ public class VehicleService : IVehicleService
         var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
 
         if (vehicle is null)
+        {
+            return ApiResponse<string>.Fail(
+                (int)HttpStatusCode.NotFound,
+                "Vehicle not found.",
+                "The specified vehicle does not exist."
+            );
+        }
+
+        // FIX: same severe gap as UpdateAsync, arguably worse here -- this
+        // method also unassigns the vehicle's GPS device in the same
+        // operation, so the missing check meant any authenticated
+        // customer could soft-delete any other customer's vehicle AND
+        // free their GPS device's assignment, simply by knowing or
+        // guessing a vehicleId.
+        if (!_currentUser.IsStaff &&
+            !string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
         {
             return ApiResponse<string>.Fail(
                 (int)HttpStatusCode.NotFound,

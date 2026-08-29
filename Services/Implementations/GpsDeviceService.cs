@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.GpsDevice;
 using ShaloTrack_API.Enums;
 using ShaloTrack_API.Models;
@@ -11,10 +12,12 @@ namespace ShaloTrack_API.Services.Implementations;
 public class GpsDeviceService : IGpsDeviceService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUser _currentUser;
 
-    public GpsDeviceService(IUnitOfWork unitOfWork)
+    public GpsDeviceService(IUnitOfWork unitOfWork, ICurrentUser currentUser)
     {
         _unitOfWork = unitOfWork;
+        _currentUser = currentUser;
     }
 
     public async Task<ApiResponse<IReadOnlyList<GpsDeviceResponseDto>>> GetAllAsync()
@@ -42,6 +45,40 @@ public class GpsDeviceService : IGpsDeviceService
                 "GPS device not found.",
                 "The specified GPS device does not exist."
             );
+        }
+
+        // FIX: real gap found during a systematic security audit -- this
+        // had no controller role restriction and no ownership check at
+        // all, so any authenticated customer who ever learned another
+        // device's ID (Guid, not trivially guessable, but still a real
+        // gap) could fetch its full details (IMEI, SIM number, activation
+        // status, etc.) directly. A device is owned through its currently
+        // active assignment's vehicle, not directly -- resolved via the
+        // already-loaded DeviceAssignments collection rather than
+        // modifying the shared repository's Include chain.
+        if (!_currentUser.IsStaff)
+        {
+            var activeAssignment = device.DeviceAssignments
+                .FirstOrDefault(a => a.Status == AssignmentStatus.Active);
+
+            bool isOwner = false;
+            if (activeAssignment is not null)
+            {
+                var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(activeAssignment.VehicleId);
+                isOwner = vehicle is not null &&
+                    string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+            }
+            // Never assigned to any vehicle means no ownership is
+            // possible to prove -- deny for non-staff rather than allow
+            // it through.
+            if (!isOwner)
+            {
+                return ApiResponse<GpsDeviceResponseDto>.Fail(
+                    (int)HttpStatusCode.NotFound,
+                    "GPS device not found.",
+                    "The specified GPS device does not exist."
+                );
+            }
         }
 
         return ApiResponse<GpsDeviceResponseDto>.Ok(
