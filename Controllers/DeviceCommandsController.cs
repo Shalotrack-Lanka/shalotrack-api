@@ -24,10 +24,12 @@ public class DeviceCommandsController : ControllerBase
 
     /// <summary>
     /// Send a command to the GPS device assigned to a vehicle.
-    /// Customer must own the vehicle. Commands validated against allowlist.
-    /// Engine cut (relay_off) excluded. Rate limited to 10/min per vehicle.
+    /// Restricted to Admin and Dealer roles only.
+    /// Engine cut (relay_off) excluded — requires safety specification.
+    /// Rate limited to 10 commands per minute per vehicle.
     /// </summary>
     [HttpPost]
+    [Authorize(Roles = "Admin,Dealer")]
     public async Task<IActionResult> SendCommand(
         Guid vehicleId,
         [FromBody] SendDeviceCommandDto dto)
@@ -45,7 +47,8 @@ public class DeviceCommandsController : ControllerBase
     }
 
     /// <summary>
-    /// Get all devices currently connected to the gateway. Staff only.
+    /// Get all devices currently connected to the gateway.
+    /// Admin and Dealer only.
     /// </summary>
     [HttpGet("/api/gateway/devices")]
     [Authorize(Roles = "Admin,Dealer")]
