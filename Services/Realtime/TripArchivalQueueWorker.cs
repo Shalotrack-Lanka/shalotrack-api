@@ -42,6 +42,19 @@ public class TripArchivalQueueWorker : BackgroundService
         {
             try
             {
+                // TEMP DIAGNOSTIC -- see TripArchivalService.ResolveTripStartAsync
+                // for context. Shows the gap between when an item was enqueued
+                // (tripCloseEvent.TripEndTime, captured at enqueue time in
+                // LocationNotificationListener) and when this worker actually
+                // started processing it -- if the queue is somehow delaying
+                // delivery, this is where it would show up. Remove once
+                // root-caused.
+                var dequeuedAt = DateTime.UtcNow;
+                _logger.LogWarning(
+                    "TripArchivalQueueWorker: [DIAG] step=dequeue device={DeviceId} tripEndTime={TripEndTime:O} dequeuedAt={DequeuedAt:O} queueDelayMs={DelayMs:F0}",
+                    tripCloseEvent.DeviceId, tripCloseEvent.TripEndTime, dequeuedAt,
+                    (dequeuedAt - tripCloseEvent.TripEndTime).TotalMilliseconds);
+
                 using var scope = _scopeFactory.CreateScope();
                 var purgeService = scope.ServiceProvider.GetRequiredService<ITripPurgeService>();
 

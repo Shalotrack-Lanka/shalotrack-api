@@ -50,11 +50,26 @@ public class TripPurgeService : ITripPurgeService
         // opened explicitly here instead of letting EF Core open/close it per
         // command, which is what makes the lock actually cover the whole
         // archive-then-delete sequence, not just one statement of it.
+        var connectionOpenStartedAt = DateTime.UtcNow;
         await _context.Database.OpenConnectionAsync(cancellationToken);
+
+        // TEMP DIAGNOSTIC -- see TripArchivalService.ResolveTripStartAsync for
+        // context. If OpenConnectionAsync or the advisory lock acquisition is
+        // ever slow (pool exhaustion, contention), this shows exactly how long
+        // it took, separate from anything happening inside ArchiveTripAsync.
+        // Remove once root-caused.
+        _logger.LogWarning(
+            "TripPurgeService: [DIAG] step=connection-opened device={DeviceId} tripEndTime={TripEndTime:O} openTookMs={OpenMs:F0}",
+            deviceId, tripEndTime, (DateTime.UtcNow - connectionOpenStartedAt).TotalMilliseconds);
 
         try
         {
             var lockAcquired = await TryAcquireAdvisoryLockAsync(deviceId, cancellationToken);
+
+            _logger.LogWarning(
+                "TripPurgeService: [DIAG] step=lock-acquire device={DeviceId} acquired={Acquired}",
+                deviceId, lockAcquired);
+
             if (!lockAcquired)
             {
                 _logger.LogInformation(

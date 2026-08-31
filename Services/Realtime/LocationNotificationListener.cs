@@ -245,7 +245,14 @@ public class LocationNotificationListener : BackgroundService
 
         if (tripJustClosed)
         {
-            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, DateTime.UtcNow));
+            // TEMP DIAGNOSTIC -- see TripArchivalService.ResolveTripStartAsync
+            // for context on the intermittent 24h-fallback bug this supports
+            // investigating. Remove once root-caused.
+            var enqueueTime = DateTime.UtcNow;
+            _logger.LogWarning(
+                "LocationNotificationListener: [DIAG] step=enqueue path=location_updates device={DeviceId} tripEndTime={TripEndTime:O}",
+                deviceId, enqueueTime);
+            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, enqueueTime));
         }
 
         if (alertsToCreate.Count > 0)
@@ -395,7 +402,13 @@ public class LocationNotificationListener : BackgroundService
 
         if (tripJustClosed)
         {
-            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, DateTime.UtcNow));
+            // TEMP DIAGNOSTIC -- see TripArchivalService.ResolveTripStartAsync
+            // for context. Remove once root-caused.
+            var enqueueTime = DateTime.UtcNow;
+            _logger.LogWarning(
+                "LocationNotificationListener: [DIAG] step=enqueue path=device_status_updates device={DeviceId} tripEndTime={TripEndTime:O}",
+                deviceId, enqueueTime);
+            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, enqueueTime));
         }
 
         if (alertsToCreate.Count > 0)
@@ -416,6 +429,17 @@ public class LocationNotificationListener : BackgroundService
             await unitOfWork.Alerts.AddAsync(alert);
         }
         await unitOfWork.SaveChangesAsync();
+
+        // TEMP DIAGNOSTIC -- see TripArchivalService.ResolveTripStartAsync for
+        // context. Confirms exactly when each alert becomes durable, so it can
+        // be compared against when a later ResolveTripStartAsync call queries
+        // for it. Remove once root-caused.
+        foreach (var alert in alerts)
+        {
+            _logger.LogWarning(
+                "LocationNotificationListener: [DIAG] step=persisted alertId={AlertId} deviceId={DeviceId} type={AlertType} triggeredAt={TriggeredAt:O} committedAt={CommittedAt:O}",
+                alert.AlertId, alert.DeviceId, alert.AlertType, alert.TriggeredAt, DateTime.UtcNow);
+        }
 
         _logger.LogInformation("Created {Count} alert(s) for vehicle {VehicleId}", alerts.Count, vehicleId);
 
