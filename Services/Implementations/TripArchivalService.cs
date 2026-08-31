@@ -138,12 +138,32 @@ public class TripArchivalService : ITripArchivalService
 
     private async Task<DateTime> ResolveTripStartAsync(Guid deviceId, DateTime tripEndTime)
     {
+        // TEMP DIAGNOSTIC -- remove once the intermittent 24h-fallback anomaly
+        // (first seen 2026-08-31, WP JK 9931, 2 of 3 real trips that night)
+        // is root-caused. Logs every decision point in one pass so a single
+        // real trip closure gives full evidence, not just a partial picture.
+        _logger.LogWarning(
+            "TripArchivalService: [DIAG] step=start device={DeviceId} tripEndTime={TripEndTime:O} kind={Kind}",
+            deviceId, tripEndTime, tripEndTime.Kind);
+
         var ignitionOnAlert = await _unitOfWork.Alerts.GetMostRecentByDeviceAndTypeAsync(
             deviceId, AlertType.IgnitionOn, tripEndTime);
+
+        _logger.LogWarning(
+            "TripArchivalService: [DIAG] step=candidate-lookup device={DeviceId} found={Found}{AlertInfo}",
+            deviceId,
+            ignitionOnAlert is not null,
+            ignitionOnAlert is null
+                ? ""
+                : $" alertId={ignitionOnAlert.AlertId} triggeredAt={ignitionOnAlert.TriggeredAt:O} kind={ignitionOnAlert.TriggeredAt.Kind}");
 
         if (ignitionOnAlert is not null)
         {
             var candidateAge = tripEndTime - ignitionOnAlert.TriggeredAt;
+
+            _logger.LogWarning(
+                "TripArchivalService: [DIAG] step=age-check device={DeviceId} candidateAgeHours={AgeHours:F4} capHours={CapHours} withinCap={WithinCap}",
+                deviceId, candidateAge.TotalHours, FallbackMaxTripDuration.TotalHours, candidateAge <= FallbackMaxTripDuration);
 
             // A device that goes permanently dark (dead battery, lost SIM,
             // physically disconnected) without ever reporting an IgnitionOff
@@ -160,11 +180,21 @@ public class TripArchivalService : ITripArchivalService
                 var hasInterveningIgnitionOff = await _unitOfWork.Alerts.ExistsByDeviceAndTypeBetweenAsync(
                     deviceId, AlertType.IgnitionOff, ignitionOnAlert.TriggeredAt, tripEndTime);
 
+                _logger.LogWarning(
+                    "TripArchivalService: [DIAG] step=intervening-check device={DeviceId} rangeStart={RangeStart:O} rangeEnd={RangeEnd:O} hasInterveningIgnitionOff={HasIntervening}",
+                    deviceId, ignitionOnAlert.TriggeredAt, tripEndTime, hasInterveningIgnitionOff);
+
                 if (!hasInterveningIgnitionOff)
                 {
+                    _logger.LogWarning(
+                        "TripArchivalService: [DIAG] step=decision device={DeviceId} result=USE_CANDIDATE tripStart={TripStart:O}",
+                        deviceId, ignitionOnAlert.TriggeredAt);
                     return ignitionOnAlert.TriggeredAt;
                 }
 
+                _logger.LogWarning(
+                    "TripArchivalService: [DIAG] step=decision device={DeviceId} result=FALLBACK reason=intervening-off",
+                    deviceId);
                 _logger.LogWarning(
                     "TripArchivalService: candidate IgnitionOn at {IgnitionOn} for device {DeviceId} was already " +
                     "closed by an intervening IgnitionOff before {TripEnd} -- falling back to the {Hours}h safety " +
@@ -174,6 +204,9 @@ public class TripArchivalService : ITripArchivalService
             else
             {
                 _logger.LogWarning(
+                    "TripArchivalService: [DIAG] step=decision device={DeviceId} result=FALLBACK reason=candidate-too-old",
+                    deviceId);
+                _logger.LogWarning(
                     "TripArchivalService: candidate IgnitionOn at {IgnitionOn} for device {DeviceId} is {AgeHours:F1}h " +
                     "old -- beyond the {CapHours}h safety cap regardless of whether an IgnitionOff exists in between " +
                     "(device may have gone dark without ever reporting one). Falling back to the safety cap.",
@@ -182,6 +215,9 @@ public class TripArchivalService : ITripArchivalService
         }
         else
         {
+            _logger.LogWarning(
+                "TripArchivalService: [DIAG] step=decision device={DeviceId} result=FALLBACK reason=no-candidate-found",
+                deviceId);
             _logger.LogWarning(
                 "TripArchivalService: no prior IgnitionOn alert found for device {DeviceId} before {TripEnd} -- " +
                 "falling back to a {Hours}h safety cap instead of pulling unbounded history.",
