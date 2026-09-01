@@ -47,6 +47,26 @@ public class DeviceCommandsController : ControllerBase
     }
 
     /// <summary>
+    /// Get command history for the GPS device assigned to a vehicle.
+    /// Returns last N commands sent and their device responses.
+    /// Admin and Dealer only.
+    /// </summary>
+    [HttpGet("history")]
+    [Authorize(Roles = "Admin,Dealer")]
+    public async Task<IActionResult> GetCommandHistory(
+        Guid vehicleId,
+        [FromQuery] int limit = 20)
+    {
+        var response = await _commandService.GetCommandHistoryAsync(
+            vehicleId,
+            _currentUser.FirebaseUid,
+            _currentUser.IsStaff,
+            limit);
+
+        return StatusCode(response.StatusCode, response);
+    }
+
+    /// <summary>
     /// Get all devices currently connected to the gateway.
     /// Admin and Dealer only.
     /// </summary>

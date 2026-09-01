@@ -1,5 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Npgsql;
 using ShaloTrack_API.DTOs.Command;
 using ShaloTrack_API.Enums;
 using ShaloTrack_API.Repositories.Interfaces;
@@ -14,6 +16,7 @@ public class DeviceCommandService : IDeviceCommandService
     private readonly HttpClient _httpClient;
     private readonly ILogger<DeviceCommandService> _logger;
     private readonly string _gatewayCommandApiUrl;
+    private readonly string _realtimeConnectionString;
 
     // -----------------------------------------------------------------------
     // Command allowlist
@@ -74,6 +77,10 @@ public class DeviceCommandService : IDeviceCommandService
         // Use DNS name — survives instance replacements without hardcoded IPs
         _gatewayCommandApiUrl = configuration["Gateway:CommandApiUrl"]
             ?? "http://gateway.shalotrack.internal:8001";
+
+        // DB1 (telemetry) — session pooler port 5432 required for persistent connection
+        _realtimeConnectionString = configuration.GetConnectionString("RealtimeConnection")
+            ?? throw new InvalidOperationException("RealtimeConnection is not configured.");
     }
 
     public async Task<ApiResponse<DeviceCommandResponseDto>> SendCommandAsync(
@@ -186,6 +193,98 @@ public class DeviceCommandService : IDeviceCommandService
         {
             return ApiResponse<DeviceCommandResponseDto>.Fail(504,
                 "Command timed out. The device may be temporarily unreachable.");
+        }
+    }
+
+    public async Task<ApiResponse<CommandHistoryResponseDto>> GetCommandHistoryAsync(
+        Guid vehicleId,
+        string? firebaseUid,
+        bool isStaff,
+        int limit = 20)
+    {
+        // Step 1 — Load vehicle and verify ownership
+        var vehicle = await _uow.Vehicles.GetByIdAsync(vehicleId);
+        if (vehicle is null || !vehicle.IsActive)
+            return ApiResponse<CommandHistoryResponseDto>.Fail(404, "Vehicle not found.");
+
+        if (!isStaff)
+        {
+            if (string.IsNullOrEmpty(firebaseUid))
+                return ApiResponse<CommandHistoryResponseDto>.Fail(401, "Unauthorized.");
+
+            var customer = await _uow.Customers.GetByFirebaseUidAsync(firebaseUid);
+            if (customer is null || vehicle.CustomerId != customer.CustomerId)
+                return ApiResponse<CommandHistoryResponseDto>.Fail(404, "Vehicle not found.");
+        }
+
+        // Step 2 — Get IMEI from active device assignment
+        var assignment = vehicle.DeviceAssignments?
+            .FirstOrDefault(a => a.Status == AssignmentStatus.Active);
+
+        if (assignment?.Device is null)
+            return ApiResponse<CommandHistoryResponseDto>.Fail(422,
+                "No GPS device is currently assigned to this vehicle.");
+
+        var imei = assignment.Device.ImeiNumber;
+
+        // Step 3 — Query CommandResponses from DB1 via RealtimeConnection
+        try
+        {
+            limit = Math.Clamp(limit, 1, 100);
+            var history = new List<CommandHistoryItemDto>();
+
+            await using var conn = new NpgsqlConnection(_realtimeConnectionString);
+            await conn.OpenAsync();
+
+            await using var cmd = new NpgsqlCommand(
+                """
+                SELECT cr."Id", cr."Command", cr."RawResponse", cr."ParsedData", cr."CreatedAt"
+                FROM "CommandResponses" cr
+                INNER JOIN "GpsDevices" gd ON gd."DeviceId" = cr."DeviceId"
+                WHERE gd."ImeiNumber" = @imei
+                ORDER BY cr."CreatedAt" DESC
+                LIMIT @limit
+                """, conn);
+
+            cmd.Parameters.AddWithValue("imei", imei);
+            cmd.Parameters.AddWithValue("limit", limit);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                object? parsedData = null;
+                if (!reader.IsDBNull(3))
+                {
+                    try
+                    {
+                        var json = reader.GetString(3);
+                        parsedData = JsonSerializer.Deserialize<object>(json);
+                    }
+                    catch { }
+                }
+
+                history.Add(new CommandHistoryItemDto
+                {
+                    Id = reader.GetInt64(0),
+                    Command = reader.GetString(1),
+                    RawResponse = reader.IsDBNull(2) ? null : reader.GetString(2),
+                    ParsedData = parsedData,
+                    CreatedAt = reader.GetDateTime(4)
+                });
+            }
+
+            return ApiResponse<CommandHistoryResponseDto>.Ok(new CommandHistoryResponseDto
+            {
+                Imei = imei,
+                History = history,
+                Count = history.Count
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch command history for vehicle {VehicleId}", vehicleId);
+            return ApiResponse<CommandHistoryResponseDto>.Fail(500,
+                "Failed to retrieve command history.");
         }
     }
 

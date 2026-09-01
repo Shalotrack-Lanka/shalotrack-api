@@ -14,4 +14,10 @@ public interface IDeviceCommandService
     Task<ApiResponse<bool>> IsDeviceOnlineAsync(string imei);
 
     Task<ApiResponse<GatewayDevicesResponseDto>> GetConnectedDevicesAsync();
+
+    Task<ApiResponse<CommandHistoryResponseDto>> GetCommandHistoryAsync(
+        Guid vehicleId,
+        string? firebaseUid,
+        bool isStaff,
+        int limit = 20);
 }
