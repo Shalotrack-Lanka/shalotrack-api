@@ -16,21 +16,24 @@ public class InternalController : ControllerBase
     private readonly ICustomerService _customerService;
     private readonly IVehicleService _vehicleService;
     private readonly IGpsTrackingService _gpsTrackingService;
-    private readonly ITripArchivalService _tripArchivalService; // NEW -- Phase 3a manual test only
-    private readonly ISetupShalotrackDeviceService _setupShalotrackDeviceService; // NEW
+    private readonly ITripArchivalService _tripArchivalService;
+    private readonly ISetupShalotrackDeviceService _setupShalotrackDeviceService;
+    private readonly IDeviceCommandService _deviceCommandService;
 
     public InternalController(
         ICustomerService customerService,
         IVehicleService vehicleService,
         IGpsTrackingService gpsTrackingService,
-        ITripArchivalService tripArchivalService, // NEW
-        ISetupShalotrackDeviceService setupShalotrackDeviceService) // NEW
+        ITripArchivalService tripArchivalService,
+        ISetupShalotrackDeviceService setupShalotrackDeviceService,
+        IDeviceCommandService deviceCommandService)
     {
         _customerService = customerService;
         _vehicleService = vehicleService;
         _gpsTrackingService = gpsTrackingService;
-        _tripArchivalService = tripArchivalService; // NEW
-        _setupShalotrackDeviceService = setupShalotrackDeviceService; // NEW
+        _tripArchivalService = tripArchivalService;
+        _setupShalotrackDeviceService = setupShalotrackDeviceService;
+        _deviceCommandService = deviceCommandService;
     }
 
     [HttpGet("customers-sync")]
@@ -53,17 +56,11 @@ public class InternalController : ControllerBase
         [FromQuery] string? imei,
         [FromQuery] string? vehicleNumber)
     {
-        // FIX: HTML datetime-local inputs parse as Kind=Unspecified, but Npgsql
-        // requires Kind=Utc for "timestamp with time zone" columns — crashes
-        // with a 500 the moment From/To are actually supplied.
         if (filter.From.HasValue) filter.From = DateTime.SpecifyKind(filter.From.Value, DateTimeKind.Utc);
         if (filter.To.HasValue) filter.To = DateTime.SpecifyKind(filter.To.Value, DateTimeKind.Utc);
 
         var vehiclesResponse = await _vehicleService.GetAllAsync();
 
-        // NEW: search by Vehicle Number — checked first since Admin's search
-        // box now resolves plate numbers here instead of querying the
-        // Vehicles table directly (Admin has no direct DB access to it).
         if (!string.IsNullOrWhiteSpace(vehicleNumber) && !filter.VehicleId.HasValue)
         {
             var matchedByNumber = vehiclesResponse.Data?.FirstOrDefault(v =>
@@ -100,15 +97,11 @@ public class InternalController : ControllerBase
         {
             statusCode = 200,
             vehicle,
-            currentLocation = trackingResponse.Data?.FirstOrDefault(), // most recent point — history is newest-first
+            currentLocation = trackingResponse.Data?.FirstOrDefault(),
             trackingHistory = trackingResponse.Data,
         });
     }
 
-    // NEW -- Admin pushes its Setup Shalotrack Devices registry here (create
-    // or update) so the mobile side knows about every physical device
-    // ShaloTrack has set up, for activation purposes. Deliberately a
-    // separate table from GpsDevices, not a merge — see chat/PR notes.
     [HttpPost("setup-devices-sync")]
     public async Task<IActionResult> SetupDevicesSync([FromBody] SyncSetupShalotrackDeviceDto dto)
     {
@@ -116,23 +109,35 @@ public class InternalController : ControllerBase
         return StatusCode(response.StatusCode, response);
     }
 
-    // NEW -- Phase 3a manual verification ONLY. Not a real feature endpoint.
-    // Do not call this against a device with live gateway traffic -- see chat
-    // history for why (WP JK 9931 vs WP CAD 9934). Same auth model as every
-    // other action in this controller: protected by AdminSyncKeyMiddleware's
-    // X-Admin-Sync-Key header check on the /api/internal prefix, nothing more --
-    // treat it as reachable only via `curl localhost` from inside an SSM
-    // session, never through the public ALB/Cloudflare path. Remove this action
-    // once Phase 3b wires ArchiveTripAsync into the real listener trigger and
-    // this manual path is no longer needed.
+    /// <summary>
+    /// Get command history for a vehicle's GPS device.
+    /// Protected by AdminSyncKeyMiddleware — X-Admin-Sync-Key header required.
+    /// Used by the admin portal to display sent commands and device responses.
+    /// </summary>
+    [HttpGet("command-history")]
+    public async Task<IActionResult> CommandHistorySync(
+        [FromQuery] Guid vehicleId,
+        [FromQuery] int limit = 20)
+    {
+        if (vehicleId == Guid.Empty)
+            return StatusCode(400, ApiResponse<string>.Fail(400, "vehicleId is required."));
+
+        // Staff bypass — isStaff=true skips ownership check
+        var response = await _deviceCommandService.GetCommandHistoryAsync(
+            vehicleId,
+            firebaseUid: null,
+            isStaff: true,
+            limit: limit);
+
+        return StatusCode(response.StatusCode, response);
+    }
+
     [HttpGet("archive-trip-test")]
     public async Task<IActionResult> ArchiveTripTest(
         [FromQuery] Guid deviceId,
         [FromQuery] Guid vehicleId,
         [FromQuery] DateTime tripEndTime)
     {
-        // Same Kind=Unspecified vs Kind=Utc fix as GpsTrackingSync above --
-        // applied here up front rather than rediscovering it a second time.
         tripEndTime = DateTime.SpecifyKind(tripEndTime, DateTimeKind.Utc);
 
         var result = await _tripArchivalService.ArchiveTripAsync(deviceId, vehicleId, tripEndTime);
