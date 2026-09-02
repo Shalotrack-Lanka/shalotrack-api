@@ -202,6 +202,7 @@ public class LocationNotificationListener : BackgroundService
         {
             await CheckLocationAlertsAsync(data);
             await CheckPlaceVisitsAsync(data); // NEW
+            await CheckGeofencesAsync(data); // NEW
         }
     }
 
@@ -320,6 +321,91 @@ public class LocationNotificationListener : BackgroundService
             await unitOfWork.SaveChangesAsync();
             _logger.LogInformation(
                 "Recorded {Count} place visit(s) for vehicle {VehicleId}", newlyEnteredPlaceIds.Count, vehicleId);
+        }
+    }
+
+    // ---- geofence detection (NEW) ----
+
+    // Same shape as CheckPlaceVisitsAsync: in-memory per-device state,
+    // transition detected under lock, DB work done outside the lock.
+    // Unlike place-visit detection (enter-only, increments a counter),
+    // this tracks BOTH enter and exit transitions and creates real Alert
+    // rows via the same BuildAlert/PersistAlertsAsync pipeline already
+    // proven for Ignition/Overspeed/PowerCut/LowBattery -- reusing that
+    // infrastructure rather than inventing a separate alert path for
+    // geofences specifically.
+    private async Task CheckGeofencesAsync(LocationNotificationPayload data)
+    {
+        var deviceId = data.DeviceId!.Value;
+        var vehicleId = data.VehicleId!.Value;
+
+        using var scope = _scopeFactory.CreateScope();
+        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+        var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+        if (vehicle is null) return;
+
+        var geofences = await unitOfWork.Geofences.GetActiveForVehicleAsync(vehicle.CustomerId, vehicleId);
+        if (geofences.Count == 0) return;
+
+        var geofencesById = geofences.ToDictionary(g => g.GeofenceId);
+        var state = _deviceStates.GetOrAdd(deviceId, _ => new DeviceAlertState());
+
+        List<Guid> newlyEnteredIds;
+        List<Guid> newlyExitedIds;
+        lock (state)
+        {
+            var currentlyInside = new HashSet<Guid>();
+            foreach (var geofence in geofences)
+            {
+                double distanceMeters = HaversineDistanceMeters(
+                    (double)data.Latitude, (double)data.Longitude,
+                    (double)geofence.Latitude, (double)geofence.Longitude);
+
+                if (distanceMeters <= geofence.RadiusMeters)
+                {
+                    currentlyInside.Add(geofence.GeofenceId);
+                }
+            }
+
+            newlyEnteredIds = currentlyInside.Except(state.InsideGeofenceIds).ToList();
+            newlyExitedIds = state.InsideGeofenceIds.Except(currentlyInside).ToList();
+            state.InsideGeofenceIds = currentlyInside;
+        }
+
+        var alertsToCreate = new List<Alert>();
+
+        foreach (var geofenceId in newlyEnteredIds)
+        {
+            var geofence = geofencesById[geofenceId];
+            if (!geofence.AlertOnEnter) continue;
+
+            alertsToCreate.Add(BuildAlert(
+                vehicleId, deviceId, data.Latitude, data.Longitude,
+                AlertType.GeofenceEnter,
+                $"Entered geofence \"{geofence.Name}\""));
+        }
+
+        foreach (var geofenceId in newlyExitedIds)
+        {
+            // A geofence deactivated/deleted between the last check and
+            // this one won't be in geofencesById (it was excluded from
+            // the fresh GetActiveForVehicleAsync fetch above) -- skip
+            // rather than throw, since exiting a geofence that no longer
+            // exists or is no longer active isn't something worth
+            // alerting on.
+            if (!geofencesById.TryGetValue(geofenceId, out var geofence)) continue;
+            if (!geofence.AlertOnExit) continue;
+
+            alertsToCreate.Add(BuildAlert(
+                vehicleId, deviceId, data.Latitude, data.Longitude,
+                AlertType.GeofenceExit,
+                $"Left geofence \"{geofence.Name}\""));
+        }
+
+        if (alertsToCreate.Count > 0)
+        {
+            await PersistAlertsAsync(alertsToCreate, vehicleId);
         }
     }
 
@@ -515,6 +601,12 @@ public class LocationNotificationListener : BackgroundService
         public bool IsSpeeding { get; set; }
         public bool? PowerStatus { get; set; }
         public bool IsLowBattery { get; set; }
+
+        // NEW -- which of this device's applicable geofences it was
+        // inside, as of the last check. Compared against the current
+        // check to detect BOTH enter and exit transitions (unlike
+        // NearbyPlaceIds below, which only ever needs enter).
+        public HashSet<Guid> InsideGeofenceIds { get; set; } = new();
 
         // NEW -- which of this device's owner's saved places it was within
         // radius of, as of the last check. Compared against the current

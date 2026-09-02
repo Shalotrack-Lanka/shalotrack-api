@@ -28,6 +28,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<EmergencyContact> EmergencyContacts => Set<EmergencyContact>();   // NEW
     public DbSet<SetupShalotrackDevice> SetupShalotrackDevices => Set<SetupShalotrackDevice>();   // NEW
     public DbSet<SavedPlace> SavedPlaces => Set<SavedPlace>();
+    public DbSet<Geofence> Geofences => Set<Geofence>();
     public DbSet<VehicleShare> VehicleShares => Set<VehicleShare>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -144,6 +145,25 @@ public class ShaloTrackDbContext : DbContext
             .HasOne(p => p.Customer)
             .WithMany()
             .HasForeignKey(p => p.CustomerId);
+
+        // NEW -- Geofencing. Customer FK uses EF's implicit default
+        // (Cascade) matching SavedPlace above. Vehicle FK is nullable by
+        // design (see Geofence.cs) -- SetNull rather than Cascade/Restrict
+        // so if a vehicle were ever hard-deleted, the geofence survives
+        // as an "all vehicles" geofence instead of being destroyed or
+        // violating the constraint. Vehicles are soft-deleted in
+        // practice (see VehicleService.DeleteAsync), so this is a safety
+        // net for an edge case that shouldn't normally occur.
+        modelBuilder.Entity<Geofence>()
+            .HasOne(g => g.Customer)
+            .WithMany()
+            .HasForeignKey(g => g.CustomerId);
+
+        modelBuilder.Entity<Geofence>()
+            .HasOne(g => g.Vehicle)
+            .WithMany()
+            .HasForeignKey(g => g.VehicleId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         // NEW -- Vehicle Sharing. Two FKs here point to the same Customer
         // table (owner and shared-with) -- Restrict on both avoids EF

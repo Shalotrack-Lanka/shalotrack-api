@@ -14,6 +14,7 @@ public interface IUnitOfWork
     ISetupShalotrackDeviceRepository SetupShalotrackDevices { get; } // NEW
     ISavedPlaceRepository SavedPlaces { get; }
     IVehicleShareRepository VehicleShares { get; }
+    IGeofenceRepository Geofences { get; }
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();
