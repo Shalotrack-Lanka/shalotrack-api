@@ -28,8 +28,24 @@ public class GeofenceService : IGeofenceService
                 (int)HttpStatusCode.Unauthorized, "Authentication required.", "No valid session found.");
         }
 
-        var geofences = await _unitOfWork.Geofences.GetByCustomerAsync(customer.CustomerId);
-        var dtoList = geofences.Select(ToDto).ToList();
+        var ownGeofences = await _unitOfWork.Geofences.GetByCustomerAsync(customer.CustomerId);
+        var dtoList = ownGeofences.Select(g => ToDto(g, isOwner: true)).ToList();
+
+        // NEW -- real gap found and fixed: geofence Enter/Exit alerts
+        // already reach an accepted shared viewer (via the same push
+        // pipeline used for every other alert type), but until this fix
+        // they had no way to actually SEE the geofence itself -- a
+        // confusing experience (a push saying "Entered geofence 'Home'"
+        // with nothing to show where "Home" even is). Same "full access
+        // = view, not structural changes" boundary as everywhere else:
+        // visible here, but UpdateAsync/DeleteAsync below remain
+        // owner-only, unaffected by this.
+        var acceptedShares = await _unitOfWork.VehicleShares.GetSharedWithMeAsync(customer.CustomerId);
+        foreach (var share in acceptedShares)
+        {
+            var ownerGeofences = await _unitOfWork.Geofences.GetForVehicleAsync(share.OwnerCustomerId, share.VehicleId);
+            dtoList.AddRange(ownerGeofences.Select(g => ToDto(g, isOwner: false)));
+        }
 
         return ApiResponse<IReadOnlyList<GeofenceResponseDto>>.Ok(dtoList, "Geofences retrieved successfully.");
     }
@@ -93,7 +109,7 @@ public class GeofenceService : IGeofenceService
 
         geofence.Vehicle = dto.VehicleId.HasValue ? await _unitOfWork.Vehicles.GetByIdAsync(dto.VehicleId.Value) : null;
 
-        return ApiResponse<GeofenceResponseDto>.Ok(ToDto(geofence), "Geofence created.");
+        return ApiResponse<GeofenceResponseDto>.Ok(ToDto(geofence, isOwner: true), "Geofence created.");
     }
 
     public async Task<ApiResponse<GeofenceResponseDto>> UpdateAsync(Guid geofenceId, UpdateGeofenceDto dto)
@@ -149,7 +165,7 @@ public class GeofenceService : IGeofenceService
 
         geofence.Vehicle = dto.VehicleId.HasValue ? await _unitOfWork.Vehicles.GetByIdAsync(dto.VehicleId.Value) : null;
 
-        return ApiResponse<GeofenceResponseDto>.Ok(ToDto(geofence), "Geofence updated.");
+        return ApiResponse<GeofenceResponseDto>.Ok(ToDto(geofence, isOwner: true), "Geofence updated.");
     }
 
     public async Task<ApiResponse<string>> DeleteAsync(Guid geofenceId)
@@ -181,7 +197,7 @@ public class GeofenceService : IGeofenceService
         return await _unitOfWork.Customers.GetByFirebaseUidAsync(uid);
     }
 
-    private static GeofenceResponseDto ToDto(Geofence geofence)
+    private static GeofenceResponseDto ToDto(Geofence geofence, bool isOwner)
     {
         return new GeofenceResponseDto
         {
@@ -195,7 +211,8 @@ public class GeofenceService : IGeofenceService
             AlertOnEnter = geofence.AlertOnEnter,
             AlertOnExit = geofence.AlertOnExit,
             IsActive = geofence.IsActive,
-            CreatedAt = geofence.CreatedAt
+            CreatedAt = geofence.CreatedAt,
+            IsOwner = isOwner
         };
     }
 }

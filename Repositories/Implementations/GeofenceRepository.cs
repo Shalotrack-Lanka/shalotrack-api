@@ -41,6 +41,16 @@ public class GeofenceRepository : IGeofenceRepository
             .ToListAsync();
     }
 
+    public async Task<List<Geofence>> GetForVehicleAsync(Guid ownerCustomerId, Guid vehicleId)
+    {
+        return await _context.Geofences
+            .AsNoTracking()
+            .Include(g => g.Vehicle)
+            .Where(g => g.CustomerId == ownerCustomerId
+                && (g.VehicleId == null || g.VehicleId == vehicleId))
+            .ToListAsync();
+    }
+
     public async Task AddAsync(Geofence geofence)
     {
         await _context.Geofences.AddAsync(geofence);

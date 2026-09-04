@@ -17,4 +17,11 @@ public class GeofenceResponseDto
     public bool AlertOnExit { get; set; }
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    // NEW -- false when this geofence is visible to the caller only
+    // because they have an accepted share on the vehicle it applies to,
+    // not because they own it. The Android side uses this to hide
+    // edit/delete controls -- same "full access = view, not structural
+    // changes" boundary already used for shared vehicles everywhere else.
+    public bool IsOwner { get; set; }
 }
