@@ -101,6 +101,28 @@ public class CustomerService : ICustomerService
             );
         }
 
+        // FIX: real, severe gap found during the pre-launch auth review.
+        // Email verification was ENTIRELY client-side enforced -- the
+        // Android app's own EmailInputActivity had a failure-fallback
+        // path that could complete registration with zero verification
+        // ever having happened (confirmed via code trace: a double
+        // failure of verifyBeforeUpdateEmail + updateEmail proceeded
+        // straight to moveToProcessing()). The backend never
+        // independently checked this at all, meaning a request sent
+        // directly to this endpoint (bypassing the app entirely) with a
+        // valid phone-auth token could register with a completely
+        // unverified, arbitrary email. IsEmailVerified reads the
+        // standard Firebase ID token claim directly off the already-
+        // validated JWT of the actual caller, not a request-body field.
+        if (!_currentUser.IsEmailVerified)
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.Forbidden,
+                "Email not verified.",
+                "Please verify your email address before completing registration."
+            );
+        }
+
         if (await _unitOfWork.Customers.GetByFirebaseUidAsync(uid) is not null)
         {
             return ApiResponse<CustomerResponseDto>.Fail(
