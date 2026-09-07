@@ -11,8 +11,8 @@ namespace ShaloTrack_API.Services.Implementations;
 public class CurrentLocationService : ICurrentLocationService
 {
     private readonly ICurrentLocationRepository _repository;
-    private readonly IUnitOfWork _unitOfWork;      // NEW — to resolve owner
-    private readonly ICurrentUser _currentUser;    // NEW
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUser _currentUser;
 
     public CurrentLocationService(
         ICurrentLocationRepository repository,
@@ -66,11 +66,17 @@ public class CurrentLocationService : ICurrentLocationService
     // requesting customer has an Accepted (not Pending) share for this
     // specific vehicle, matching the "full access" decision already made
     // for what a shared viewer gets.
+    //
+    // PERFORMANCE FIX: switched from GetByIdAsync (loads full DeviceAssignment
+    // history + Device records) to GetByIdForOwnershipCheckAsync (loads Customer
+    // only). This method only needs Customer.FirebaseUid for the ownership
+    // check — loading IMEI and assignment history was dead weight on every
+    // request to this endpoint.
     private async Task<bool> OwnsVehicleAsync(Guid vehicleId)
     {
         if (_currentUser.IsStaff) return true;
 
-        var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+        var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId);
         if (vehicle is null) return false;
 
         if (string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))

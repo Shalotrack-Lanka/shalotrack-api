@@ -277,7 +277,10 @@ public class LocationNotificationListener : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
-        var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+        // PERFORMANCE FIX: GetByIdForOwnershipCheckAsync — only CustomerId
+        // is needed here to load the customer's saved places. Loading the
+        // full DeviceAssignment history on every GPS ping was dead weight.
+        var vehicle = await unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId);
         if (vehicle is null) return;
 
         var places = await unitOfWork.SavedPlaces.GetByCustomerAsync(vehicle.CustomerId);
@@ -342,7 +345,10 @@ public class LocationNotificationListener : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
-        var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+        // PERFORMANCE FIX: GetByIdForOwnershipCheckAsync — only CustomerId
+        // is needed here to scope the geofence query. Loading the full
+        // DeviceAssignment history on every GPS ping was dead weight.
+        var vehicle = await unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId);
         if (vehicle is null) return;
 
         var geofences = await unitOfWork.Geofences.GetActiveForVehicleAsync(vehicle.CustomerId, vehicleId);
@@ -529,6 +535,13 @@ public class LocationNotificationListener : BackgroundService
 
         _logger.LogInformation("Created {Count} alert(s) for vehicle {VehicleId}", alerts.Count, vehicleId);
 
+        // NOTE: GetByIdAsync (full load) is intentional here — unlike the
+        // ownership checks elsewhere, this call needs vehicle.VehicleNumber
+        // to build the push notification title AND vehicle.CustomerId to
+        // resolve the FCM token. The lightweight GetByIdForOwnershipCheckAsync
+        // loads Customer only (no Vehicle scalar fields like VehicleNumber),
+        // so it cannot be used here. This runs once per alert batch, not
+        // per GPS ping, so the cost is acceptable.
         var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId);
         if (vehicle is null)
         {

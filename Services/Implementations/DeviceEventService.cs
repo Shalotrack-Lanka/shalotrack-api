@@ -32,6 +32,10 @@ public class DeviceEventService : IDeviceEventService
     // addressed. Non-staff callers must specify VehicleId and must own
     // it -- deny-by-default rather than allow an unscoped, system-wide
     // query across every customer's device events.
+    //
+    // PERFORMANCE FIX: switched from GetByIdAsync (loads full DeviceAssignment
+    // history + Device records) to GetByIdForOwnershipCheckAsync (loads Customer
+    // only). Ownership checks here only need Customer.FirebaseUid.
     public async Task<ApiResponse<List<DeviceEventResponseDto>>> GetAsync(
         DeviceEventFilter filter)
     {
@@ -45,7 +49,7 @@ public class DeviceEventService : IDeviceEventService
                     "A specific vehicle must be specified.");
             }
 
-            var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(filter.VehicleId.Value);
+            var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(filter.VehicleId.Value);
             bool isOwner = vehicle is not null &&
                 string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
             if (!isOwner)
@@ -77,12 +81,15 @@ public class DeviceEventService : IDeviceEventService
         // FIX: same real gap as GetAsync -- was returning any event by ID
         // with zero ownership check. An eventId is a plain auto-
         // incrementing long, trivially enumerable.
+        //
+        // PERFORMANCE FIX: GetByIdForOwnershipCheckAsync instead of
+        // GetByIdAsync — only Customer.FirebaseUid needed here.
         if (!_currentUser.IsStaff)
         {
             bool isOwner = false;
             if (deviceEvent.VehicleId.HasValue)
             {
-                var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(deviceEvent.VehicleId.Value);
+                var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(deviceEvent.VehicleId.Value);
                 isOwner = vehicle is not null &&
                     string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
             }

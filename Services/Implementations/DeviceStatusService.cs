@@ -10,8 +10,8 @@ namespace ShaloTrack_API.Services.Implementations;
 public class DeviceStatusService : IDeviceStatusService
 {
     private readonly IDeviceStatusRepository _repository;
-    private readonly IUnitOfWork _unitOfWork;      // NEW
-    private readonly ICurrentUser _currentUser;    // NEW
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUser _currentUser;
 
     public DeviceStatusService(
         IDeviceStatusRepository repository,
@@ -58,11 +58,16 @@ public class DeviceStatusService : IDeviceStatusService
         return ApiResponse<DeviceStatusResponseDto>.Ok(status, "Device status retrieved successfully.");
     }
 
+    // PERFORMANCE FIX: switched from GetByIdAsync (loads full DeviceAssignment
+    // history + Device records) to GetByIdForOwnershipCheckAsync (loads Customer
+    // only). OwnsVehicleAsync only needs Customer.FirebaseUid — loading IMEI
+    // and assignment history on every device status request was dead weight.
     private async Task<bool> OwnsVehicleAsync(Guid? vehicleId)
     {
         if (_currentUser.IsStaff) return true;
         if (vehicleId is null) return false;
-        var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId.Value);
+
+        var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId.Value);
         return vehicle is not null &&
                string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
     }
