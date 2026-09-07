@@ -4,6 +4,9 @@ namespace ShaloTrack_API.Extensions;
 
 public static class SwaggerExtensions
 {
+    // Called unconditionally in builder.Services — Swagger generation metadata
+    // is always registered. The middleware method below decides whether to
+    // actually expose the UI based on environment.
     public static IServiceCollection AddSwaggerDocumentation(
         this IServiceCollection services)
     {
@@ -18,7 +21,7 @@ public static class SwaggerExtensions
                 Description = "REST API for the ShaloTrack GPS Tracking Platform."
             });
 
-            // --- Bearer auth so the Authorize padlock appears ---
+            // Bearer auth so the Authorize padlock appears in Swagger UI.
             options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
             {
                 Name = "Authorization",
@@ -56,9 +59,26 @@ public static class SwaggerExtensions
         return services;
     }
 
+    // SECURITY FIX: Swagger UI is only served in Development.
+    // In Production, /swagger/* returns 404.
+    //
+    // The original code had:
+    //   if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
+    // — that condition is always true. Swagger was serving publicly on
+    // production the entire time. Fixed by removing the condition and gating
+    // inside this method on IsDevelopment() only.
+    //
+    // Call in Program.cs as:
+    //   app.UseSwaggerDocumentation(app.Environment);
     public static IApplicationBuilder UseSwaggerDocumentation(
-        this IApplicationBuilder app)
+        this IApplicationBuilder app,
+        IWebHostEnvironment env)
     {
+        if (!env.IsDevelopment())
+        {
+            return app;
+        }
+
         app.UseSwagger();
 
         app.UseSwaggerUI(options =>

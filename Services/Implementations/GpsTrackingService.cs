@@ -15,6 +15,14 @@ public class GpsTrackingService : IGpsTrackingService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
 
+    // PERFORMANCE FIX: Hard cap on the date range for trip report queries.
+    // GetPointsForTripsAsync is unbounded — a 30-day query loads ~43,000
+    // GPS points into C# RAM, walks every one in a loop, then discards them.
+    // 7 days = ~10,000 points per vehicle — a reasonable upper bound that
+    // covers weekly fleet reviews without risking memory exhaustion on t3.micro.
+    // Clients needing longer ranges make multiple calls.
+    private const int MaxTripReportDays = 7;
+
     public GpsTrackingService(
         IGpsTrackingRepository repository,
         IUnitOfWork unitOfWork,
@@ -39,16 +47,12 @@ public class GpsTrackingService : IGpsTrackingService
 
         if (!_currentUser.IsStaff)
         {
-            var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(filter.VehicleId.Value);
+            // PERFORMANCE FIX: use GetByIdForOwnershipCheckAsync (loads Customer
+            // only) instead of GetByIdAsync (loads full DeviceAssignment history).
+            var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(filter.VehicleId.Value);
             bool isOwner = vehicle is not null &&
                 string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
 
-            // FIX: was owner-or-staff only -- a shared viewer got rejected
-            // here even after accepting a share, same real bug already
-            // found and fixed in CurrentLocationService. Confirmed via
-            // real screenshots ("Couldn't load trips (code 404)" and a
-            // trail that wasn't snapping to roads because this endpoint
-            // couldn't even return the raw points).
             bool hasAcceptedShare = false;
             if (!isOwner && vehicle is not null)
             {
@@ -82,13 +86,16 @@ public class GpsTrackingService : IGpsTrackingService
     /// <summary>
     /// Computes trip and stop reports for a vehicle over a date range.
     ///
-    /// A "stop" is 5+ continuous minutes stationary -- recorded as an individual
+    /// A "stop" is 5+ continuous minutes stationary — recorded as an individual
     /// StopSummaryDto (location + full duration), not just a count.
     ///
     /// A "trip" additionally requires at least 100m of straight-line displacement
     /// between its start and end (filters GPS jitter while parked from being
     /// misread as a trip). Each trip also carries DistanceKm (real route distance,
     /// summed point-to-point) and MaxSpeed/AvgSpeed for the Speed report tab.
+    ///
+    /// PERFORMANCE: date range is capped at MaxTripReportDays (7 days).
+    /// Clients needing longer ranges make multiple calls with different windows.
     /// </summary>
     public async Task<ApiResponse<TripsReportResponseDto>> GetTripsSummaryAsync(Guid vehicleId, DateTime from, DateTime to)
     {
@@ -110,15 +117,27 @@ public class GpsTrackingService : IGpsTrackingService
             );
         }
 
+        // PERFORMANCE FIX: enforce the date range cap server-side.
+        // A 30-day trip report loads ~43,000 points into C# memory. Cap at
+        // 7 days to keep memory use predictable and response times acceptable.
+        if ((to - from).TotalDays > MaxTripReportDays)
+        {
+            return ApiResponse<TripsReportResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest,
+                "Date range too large.",
+                $"Trip reports are limited to {MaxTripReportDays} days per request. " +
+                $"Split longer ranges into multiple calls."
+            );
+        }
+
         if (!_currentUser.IsStaff)
         {
-            var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+            // PERFORMANCE FIX: use GetByIdForOwnershipCheckAsync (loads Customer
+            // only) instead of GetByIdAsync (loads full DeviceAssignment history).
+            var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId);
             bool isOwner = vehicle is not null &&
                 string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
 
-            // Same fix as GetAsync above -- this is the actual source of
-            // the real "Couldn't load trips (code 404)" error confirmed
-            // via screenshot for a shared vehicle.
             bool hasAcceptedShare = false;
             if (!isOwner && vehicle is not null)
             {
@@ -170,7 +189,7 @@ public class GpsTrackingService : IGpsTrackingService
 
             if (isMoving)
             {
-                // Movement resumed -- finalize any qualifying stop that just ended.
+                // Movement resumed — finalize any qualifying stop that just ended.
                 if (stopStartPoint is not null && stopAlreadyCounted)
                 {
                     stops.Add(BuildStopSummary(stopStartPoint, lastStationaryPoint!, inProgress: false));
@@ -204,7 +223,7 @@ public class GpsTrackingService : IGpsTrackingService
             }
             else
             {
-                // Sub-threshold stationary point while a trip is open -- still counts
+                // Sub-threshold stationary point while a trip is open — still counts
                 // toward the trip's distance/speed stats (a brief idle moment
                 // shouldn't break the trip).
                 if (tripStart is not null && previousPointInTrip is not null)
@@ -251,7 +270,7 @@ public class GpsTrackingService : IGpsTrackingService
             }
         }
 
-        // Window ended mid-trip -- close it as "in progress."
+        // Window ended mid-trip — close it as "in progress."
         if (tripStart is not null && lastMovingPoint is not null)
         {
             double displacementMeters = HaversineMeters(
@@ -265,7 +284,7 @@ public class GpsTrackingService : IGpsTrackingService
             }
         }
 
-        // Window ended mid-stop -- close it as "in progress."
+        // Window ended mid-stop — close it as "in progress."
         if (stopStartPoint is not null && stopAlreadyCounted)
         {
             stops.Add(BuildStopSummary(stopStartPoint, lastStationaryPoint!, inProgress: true));

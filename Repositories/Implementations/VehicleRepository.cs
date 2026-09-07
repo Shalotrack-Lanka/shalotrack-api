@@ -16,13 +16,13 @@ public class VehicleRepository : IVehicleRepository
 
     public async Task<List<Vehicle>> GetAllAsync()
     {
-        // NOTE: deliberately NOT filtering by IsActive here -- this is the
+        // NOTE: deliberately NOT filtering by IsActive here — this is the
         // staff-only listing, and staff likely need visibility into removed
         // vehicles too (audit/support purposes).
         return await _context.Vehicles
             .Include(v => v.Customer)
-            .Include(v => v.DeviceAssignments)   // FIX: was missing — HasGpsDevice/Imei
-            .ThenInclude(a => a.Device)          // were silently always false/null here
+            .Include(v => v.DeviceAssignments)
+            .ThenInclude(a => a.Device)
             .AsNoTracking()
             .OrderBy(v => v.VehicleNumber)
             .ToListAsync();
@@ -30,25 +30,48 @@ public class VehicleRepository : IVehicleRepository
 
     public async Task<Vehicle?> GetByIdAsync(Guid vehicleId)
     {
-        // NOTE: deliberately NOT filtering by IsActive here -- a removed
+        // NOTE: deliberately NOT filtering by IsActive here — a removed
         // vehicle's basic info may still legitimately need to be looked up
         // (e.g. viewing historical trips/alerts that reference it).
         return await _context.Vehicles
             .Include(v => v.Customer)
             .Include(v => v.DeviceAssignments)
-            .ThenInclude(a => a.Device) //to get the IMEI
+            .ThenInclude(a => a.Device)
+            .FirstOrDefaultAsync(v => v.VehicleId == vehicleId);
+    }
+
+    /// <summary>
+    /// PERFORMANCE FIX: Lightweight ownership check — loads Customer only.
+    ///
+    /// The original GetByIdAsync() loads the full DeviceAssignment history
+    /// (all past and active assignments + their Device records) on every call.
+    /// Every ownership check in every service fired GetByIdAsync(), meaning
+    /// every single API request was loading data it didn't need just to
+    /// compare vehicle.Customer.FirebaseUid against the caller's UID.
+    ///
+    /// This method exists for that single purpose: verify ownership.
+    /// Any code path that only needs Customer.FirebaseUid must use this
+    /// instead of GetByIdAsync().
+    ///
+    /// Callers that need IMEI or full assignment data (VehicleService.GetByIdAsync,
+    /// DTO mapping, IMEI display) continue to use GetByIdAsync().
+    /// </summary>
+    public async Task<Vehicle?> GetByIdForOwnershipCheckAsync(Guid vehicleId)
+    {
+        return await _context.Vehicles
+            .Include(v => v.Customer)
+            .AsNoTracking()
             .FirstOrDefaultAsync(v => v.VehicleId == vehicleId);
     }
 
     public async Task<List<Vehicle>> GetByCustomerAsync(Guid customerId)
     {
-        // FIX: this is the customer-facing "my vehicles" list -- a removed
-        // vehicle must disappear from here for its former owner, so a
-        // deactivated vehicle no longer shows up once soft-deleted.
+        // FIX: this is the customer-facing "my vehicles" list — a deactivated
+        // vehicle must disappear from here for its former owner.
         return await _context.Vehicles
             .Include(v => v.Customer)
-            .Include(v => v.DeviceAssignments)      // FIX: was missing entirely —
-            .ThenInclude(a => a.Device)          // HasGpsDevice was silently always false here
+            .Include(v => v.DeviceAssignments)
+            .ThenInclude(a => a.Device)
             .Where(v => v.CustomerId == customerId && v.IsActive)
             .AsNoTracking()
             .OrderBy(v => v.VehicleNumber)
@@ -93,8 +116,8 @@ public class VehicleRepository : IVehicleRepository
     {
         // NOTE: this raw hard-delete method is left in place (some future,
         // genuine admin "purge" tool might legitimately need it), but
-        // VehicleService.DeleteAsync() no longer calls this -- it soft-
-        // deletes via IsActive instead. See VehicleService.cs.
+        // VehicleService.DeleteAsync() no longer calls this — it soft-deletes
+        // via IsActive instead. See VehicleService.cs.
         _context.Vehicles.Remove(vehicle);
     }
 }

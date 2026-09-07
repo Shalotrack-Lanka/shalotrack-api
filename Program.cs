@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder.Extensions;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Logs;
@@ -39,6 +40,11 @@ builder.Services.AddHostedService<TripArchivalQueueWorker>();
 // ASP.NET Core
 builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();
+
+// ---- RATE LIMITING ----
+// Protects all API endpoints from abuse and cost-scaling attacks.
+// Policy details in Extensions/RateLimitingExtensions.cs.
+builder.Services.AddShaloTrackRateLimiting();
 
 // ---- AUTH ----
 var firebaseProjectId = builder.Configuration["Firebase:ProjectId"]
@@ -204,21 +210,34 @@ app.UseExceptionHandler(exceptionHandlerApp =>
     });
 });
 
-if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
-{
-    app.UseSwaggerDocumentation();
-}
+// SECURITY FIX: Swagger locked to Development only.
+// The original code used:
+//   if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
+// — always true, so Swagger was always public. Fixed: env check is inside
+// UseSwaggerDocumentation() and gates on IsDevelopment() only.
+app.UseSwaggerDocumentation(app.Environment);
+
+// SECURITY FIX: Rate limiting middleware.
+// After ForwardedHeaders + exception handler (infrastructure concerns),
+// before auth — abusive requests are dropped before JWT validation runs.
+app.UseRateLimiter();
 
 app.UseMiddleware<AdminSyncKeyMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Health check must never be rate-limited — ALB and monitoring hit this
+// constantly. DisableRateLimiting() exempts it from the global policy.
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }))
-   .AllowAnonymous();
+   .AllowAnonymous()
+   .DisableRateLimiting();
 
 app.MapControllers();
 
-app.MapHub<LocationHub>("/hubs/location");
+// SECURITY FIX: SignalR hub now rate-limited on negotiate.
+// 20 connection attempts / 60 seconds per IP prevents connection-flood abuse.
+app.MapHub<LocationHub>("/hubs/location")
+   .RequireRateLimiting(RateLimitingExtensions.Policies.SignalRHub);
 
 app.Run();

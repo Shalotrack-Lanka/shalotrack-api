@@ -1,14 +1,16 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.Customer;
+using ShaloTrack_API.Extensions;
 using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]                                   // every action requires a valid token
+[Authorize]
 public class CustomersController : ControllerBase
 {
     private readonly ICustomerService _customerService;
@@ -27,7 +29,6 @@ public class CustomersController : ControllerBase
     public async Task<IActionResult> GetMyProfile()
     {
         var response = await _customerService.GetMyProfileAsync();
-
         return StatusCode(response.StatusCode, response);
     }
 
@@ -39,7 +40,6 @@ public class CustomersController : ControllerBase
     public async Task<IActionResult> GetAll()
     {
         var response = await _customerService.GetAllAsync();
-
         return StatusCode(response.StatusCode, response);
     }
 
@@ -51,23 +51,23 @@ public class CustomersController : ControllerBase
     public async Task<IActionResult> GetById(Guid customerId)
     {
         var response = await _customerService.GetByIdAsync(customerId);
-
         return StatusCode(response.StatusCode, response);
     }
 
     /// <summary>
-    /// Create a new customer. The token proves the verified Firebase account;
-    /// the service binds the new record to that uid.
+    /// Create a new customer profile.
+    /// Tighter rate limit (auth_sensitive) — 20 req/60s per IP — because
+    /// this is the highest-value abuse target: spamming account creation
+    /// with burner Firebase tokens.
     /// </summary>
     [HttpPost]
-    public async Task<IActionResult> Create(
-        [FromBody] CreateCustomerDto dto)
+    [EnableRateLimiting(RateLimitingExtensions.Policies.AuthSensitive)]
+    public async Task<IActionResult> Create([FromBody] CreateCustomerDto dto)
     {
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
         var response = await _customerService.CreateAsync(dto);
-
         return StatusCode(response.StatusCode, response);
     }
 
@@ -83,10 +83,7 @@ public class CustomersController : ControllerBase
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
-        var response = await _customerService.UpdateAsync(
-            customerId,
-            dto);
-
+        var response = await _customerService.UpdateAsync(customerId, dto);
         return StatusCode(response.StatusCode, response);
     }
 
@@ -98,7 +95,6 @@ public class CustomersController : ControllerBase
     public async Task<IActionResult> Deactivate(Guid customerId)
     {
         var response = await _customerService.DeactivateAsync(customerId);
-
         return StatusCode(response.StatusCode, response);
     }
 
@@ -107,14 +103,9 @@ public class CustomersController : ControllerBase
     /// </summary>
     [HttpGet("{customerId:guid}/dashboard")]
     [OwnsCustomer]
-    public async Task<IActionResult> GetDashboard(
-        Guid customerId)
+    public async Task<IActionResult> GetDashboard(Guid customerId)
     {
-        var response =
-            await _customerService.GetDashboardAsync(customerId);
-
-        return StatusCode(
-            response.StatusCode,
-            response);
+        var response = await _customerService.GetDashboardAsync(customerId);
+        return StatusCode(response.StatusCode, response);
     }
 }

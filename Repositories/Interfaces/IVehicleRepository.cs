@@ -8,6 +8,14 @@ public interface IVehicleRepository
 
     Task<Vehicle?> GetByIdAsync(Guid vehicleId);
 
+    /// <summary>
+    /// Lightweight ownership check — loads Customer (for FirebaseUid) only.
+    /// Does NOT load DeviceAssignments or Device. Use this in service-layer
+    /// ownership checks where the IMEI and assignment history are not needed.
+    /// Avoids loading the full assignment history on every authorization check.
+    /// </summary>
+    Task<Vehicle?> GetByIdForOwnershipCheckAsync(Guid vehicleId);
+
     Task<List<Vehicle>> GetByCustomerAsync(Guid customerId);
 
     Task<Vehicle?> GetByVehicleNumberAsync(string vehicleNumber);

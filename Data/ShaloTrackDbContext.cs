@@ -24,9 +24,9 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<DeviceEvent> DeviceEvents => Set<DeviceEvent>();
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<CustomerFcmToken> CustomerFcmTokens => Set<CustomerFcmToken>();
-    public DbSet<Subscription> Subscriptions => Set<Subscription>();   // NEW
-    public DbSet<EmergencyContact> EmergencyContacts => Set<EmergencyContact>();   // NEW
-    public DbSet<SetupShalotrackDevice> SetupShalotrackDevices => Set<SetupShalotrackDevice>();   // NEW
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();
+    public DbSet<EmergencyContact> EmergencyContacts => Set<EmergencyContact>();
+    public DbSet<SetupShalotrackDevice> SetupShalotrackDevices => Set<SetupShalotrackDevice>();
     public DbSet<SavedPlace> SavedPlaces => Set<SavedPlace>();
     public DbSet<Geofence> Geofences => Set<Geofence>();
     public DbSet<VehicleShare> VehicleShares => Set<VehicleShare>();
@@ -34,6 +34,7 @@ public class ShaloTrackDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
         modelBuilder.Entity<Customer>()
             .HasIndex(c => c.FirebaseUid)
             .IsUnique();
@@ -56,10 +57,26 @@ public class ShaloTrackDbContext : DbContext
             .WithMany(d => d.RawPackets)
             .HasForeignKey(r => r.DeviceId);
 
+        modelBuilder.Entity<RawPacket>()
+            .HasIndex(r => new { r.DeviceId, r.ReceivedAt })
+            .HasDatabaseName("IX_RawPackets_DeviceId_ReceivedAt");
+
         modelBuilder.Entity<GpsTracking>()
             .HasOne(g => g.Device)
             .WithMany(d => d.GpsTrackings)
             .HasForeignKey(g => g.DeviceId);
+
+        // PERFORMANCE FIX: composite index on (DeviceId, EventTime DESC).
+        // Every trip query filters on DeviceId AND EventTime BETWEEN from AND to.
+        // Without this, Postgres uses the single-column DeviceId index to find
+        // the device's rows, then scans all of them to apply the date filter.
+        // The composite index satisfies both predicates from the index alone —
+        // O(log n + result rows) instead of O(device_rows). EventTime DESC
+        // because trip queries almost always want recent-first.
+        modelBuilder.Entity<GpsTracking>()
+            .HasIndex(g => new { g.DeviceId, g.EventTime })
+            .HasDatabaseName("IX_GpsTrackings_DeviceId_EventTime")
+            .IsDescending(false, true);
 
         modelBuilder.Entity<DeviceAssignment>()
             .HasOne(a => a.Vehicle)
@@ -110,29 +127,23 @@ public class ShaloTrackDbContext : DbContext
             .HasIndex(t => t.FcmToken)
             .IsUnique();
 
-        // NEW
+        modelBuilder.Entity<Alert>()
+            .HasIndex(a => new { a.DeviceId, a.AlertType, a.TriggeredAt })
+            .HasDatabaseName("IX_Alerts_DeviceId_AlertType_TriggeredAt");
+
         modelBuilder.Entity<Subscription>()
             .HasOne(s => s.Customer)
             .WithMany()
             .HasForeignKey(s => s.CustomerId);
 
-        // NEW
         modelBuilder.Entity<EmergencyContact>()
             .HasOne(c => c.Customer)
             .WithMany()
             .HasForeignKey(c => c.CustomerId);
 
-        modelBuilder.Entity<Alert>()
-            .HasIndex(a => new { a.DeviceId, a.AlertType, a.TriggeredAt })
-            .HasDatabaseName("IX_Alerts_DeviceId_AlertType_TriggeredAt");
-
-        modelBuilder.Entity<RawPacket>()
-            .HasIndex(r => new { r.DeviceId, r.ReceivedAt })
-            .HasDatabaseName("IX_RawPackets_DeviceId_ReceivedAt");
-
-        // NEW -- SetupShalotrackDevice.Id mirrors Admin's shdevice_id
-        // directly, not an identity column, since this table is a straight
-        // mirror of Admin's data rather than a locally-originated entity.
+        // SetupShalotrackDevice.Id mirrors Admin's shdevice_id directly,
+        // not an identity column, since this table is a straight mirror of
+        // Admin's data rather than a locally-originated entity.
         modelBuilder.Entity<SetupShalotrackDevice>()
             .Property(d => d.Id)
             .ValueGeneratedNever();
@@ -146,14 +157,13 @@ public class ShaloTrackDbContext : DbContext
             .WithMany()
             .HasForeignKey(p => p.CustomerId);
 
-        // NEW -- Geofencing. Customer FK uses EF's implicit default
-        // (Cascade) matching SavedPlace above. Vehicle FK is nullable by
-        // design (see Geofence.cs) -- SetNull rather than Cascade/Restrict
-        // so if a vehicle were ever hard-deleted, the geofence survives
-        // as an "all vehicles" geofence instead of being destroyed or
-        // violating the constraint. Vehicles are soft-deleted in
-        // practice (see VehicleService.DeleteAsync), so this is a safety
-        // net for an edge case that shouldn't normally occur.
+        // Geofencing. Customer FK uses EF's implicit default (Cascade)
+        // matching SavedPlace above. Vehicle FK is nullable by design --
+        // SetNull rather than Cascade/Restrict so if a vehicle were ever
+        // hard-deleted, the geofence survives as an "all vehicles" geofence
+        // instead of being destroyed or violating the constraint. Vehicles
+        // are soft-deleted in practice (see VehicleService.DeleteAsync),
+        // so this is a safety net for an edge case that shouldn't occur.
         modelBuilder.Entity<Geofence>()
             .HasOne(g => g.Customer)
             .WithMany()
@@ -165,10 +175,10 @@ public class ShaloTrackDbContext : DbContext
             .HasForeignKey(g => g.VehicleId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        // NEW -- Vehicle Sharing. Two FKs here point to the same Customer
-        // table (owner and shared-with) -- Restrict on both avoids EF
-        // Core trying to create two cascade-delete paths from Customer,
-        // which most databases reject outright as a conflict.
+        // Vehicle Sharing. Two FKs point to the same Customer table
+        // (owner and shared-with) -- Restrict on both avoids EF Core
+        // trying to create two cascade-delete paths from Customer, which
+        // most databases reject outright as a conflict.
         modelBuilder.Entity<VehicleShare>()
             .HasOne(s => s.Vehicle)
             .WithMany()
