@@ -21,7 +21,7 @@ public class GpsTrackingService : IGpsTrackingService
     // 7 days = ~10,000 points per vehicle — a reasonable upper bound that
     // covers weekly fleet reviews without risking memory exhaustion on t3.micro.
     // Clients needing longer ranges make multiple calls.
-    private const int MaxTripReportDays = 7;
+    private const int MaxTripReportDays = 90;
 
     public GpsTrackingService(
         IGpsTrackingRepository repository,
@@ -94,7 +94,7 @@ public class GpsTrackingService : IGpsTrackingService
     /// misread as a trip). Each trip also carries DistanceKm (real route distance,
     /// summed point-to-point) and MaxSpeed/AvgSpeed for the Speed report tab.
     ///
-    /// PERFORMANCE: date range is capped at MaxTripReportDays (7 days).
+    /// PERFORMANCE: date range is capped at MaxTripReportDays (90 days).
     /// Clients needing longer ranges make multiple calls with different windows.
     /// </summary>
     public async Task<ApiResponse<TripsReportResponseDto>> GetTripsSummaryAsync(Guid vehicleId, DateTime from, DateTime to)
