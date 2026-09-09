@@ -50,7 +50,14 @@ public class CustomerRepository : ICustomerRepository
 
     public async Task<List<Customer>> GetAllAsync()
     {
+        // Include Vehicles so VehicleCount = customer.Vehicles.Count is
+        // accurate when the admin portal calls /api/internal/customers-sync.
+        // Without this Include, Vehicles is always an empty collection and
+        // VehicleCount is always 0 in the sync payload — which was causing
+        // the admin portal to show 0 vehicles for every customer even when
+        // they had registered vehicles on the app.
         return await _context.Customers
+            .Include(c => c.Vehicles)
             .AsNoTracking()
             .OrderBy(c => c.FullName)
             .ToListAsync();
