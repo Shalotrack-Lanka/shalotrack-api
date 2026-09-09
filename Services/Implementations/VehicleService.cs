@@ -400,7 +400,7 @@ public class VehicleService : IVehicleService
         {
             VehicleId = vehicle.VehicleId,
             CustomerId = vehicle.CustomerId,
-            CustomerName = vehicle.Customer.FullName,
+            CustomerName = vehicle.Customer?.FullName ?? string.Empty, // null-guard: orphaned vehicle rows caused NullReferenceException crashing vehicles-sync endpoint
             VehicleNumber = vehicle.VehicleNumber,
             ChassisNumber = vehicle.ChassisNumber,
             EngineNumber = vehicle.EngineNumber,
