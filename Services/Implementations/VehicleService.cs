@@ -70,7 +70,7 @@ public class VehicleService : IVehicleService
             }
         }
 
-        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare)
+        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare && !vehicle.IsDemoVehicle)
         {
             return ApiResponse<VehicleResponseDto>.Fail(
                 (int)HttpStatusCode.NotFound, "Vehicle not found.",
@@ -233,6 +233,19 @@ public class VehicleService : IVehicleService
             );
         }
 
+        // NEW -- the shared demo vehicle is staff-managed only, even for
+        // whoever the recorded owner happens to be. Per direct
+        // confirmation: no regular customer should be able to modify the
+        // one vehicle every customer sees as a read-only demo.
+        if (vehicle.IsDemoVehicle && !_currentUser.IsStaff)
+        {
+            return ApiResponse<VehicleResponseDto>.Fail(
+                (int)HttpStatusCode.Forbidden,
+                "Demo vehicle is read-only.",
+                "This is the shared demo vehicle and can't be edited."
+            );
+        }
+
         var existingVehicle = await _unitOfWork.Vehicles.GetByVehicleNumberAsync(dto.VehicleNumber);
 
         if (existingVehicle is not null &&
@@ -324,6 +337,18 @@ public class VehicleService : IVehicleService
                 (int)HttpStatusCode.NotFound,
                 "Vehicle not found.",
                 "The specified vehicle does not exist."
+            );
+        }
+
+        // NEW -- same reasoning as UpdateAsync, arguably more important
+        // here since this also unassigns the GPS device. The shared demo
+        // vehicle can't be deleted by anyone except staff.
+        if (vehicle.IsDemoVehicle && !_currentUser.IsStaff)
+        {
+            return ApiResponse<string>.Fail(
+                (int)HttpStatusCode.Forbidden,
+                "Demo vehicle is read-only.",
+                "This is the shared demo vehicle and can't be removed."
             );
         }
 

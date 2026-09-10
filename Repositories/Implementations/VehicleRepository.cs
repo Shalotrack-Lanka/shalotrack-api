@@ -84,6 +84,13 @@ public class VehicleRepository : IVehicleRepository
             .FirstOrDefaultAsync(v => v.VehicleNumber == vehicleNumber);
     }
 
+    public async Task<Vehicle?> GetDemoVehicleAsync()
+    {
+        return await _context.Vehicles
+            .Include(v => v.CurrentLocation)
+            .FirstOrDefaultAsync(v => v.IsDemoVehicle);
+    }
+
     public async Task<Vehicle?> GetByChassisNumberAsync(string chassisNumber)
     {
         return await _context.Vehicles

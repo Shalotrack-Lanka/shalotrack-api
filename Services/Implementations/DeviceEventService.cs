@@ -52,7 +52,9 @@ public class DeviceEventService : IDeviceEventService
             var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(filter.VehicleId.Value);
             bool isOwner = vehicle is not null &&
                 string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
-            if (!isOwner)
+            // NEW -- the one, shared demo vehicle, readable by every customer.
+            bool isDemoVehicle = vehicle?.IsDemoVehicle ?? false;
+            if (!isOwner && !isDemoVehicle)
             {
                 return ApiResponse<List<DeviceEventResponseDto>>.Fail(
                     (int)HttpStatusCode.NotFound,
@@ -87,15 +89,18 @@ public class DeviceEventService : IDeviceEventService
         if (!_currentUser.IsStaff)
         {
             bool isOwner = false;
+            bool isDemoVehicle = false;
             if (deviceEvent.VehicleId.HasValue)
             {
                 var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(deviceEvent.VehicleId.Value);
                 isOwner = vehicle is not null &&
                     string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+                // NEW -- the one, shared demo vehicle, readable by every customer.
+                isDemoVehicle = vehicle?.IsDemoVehicle ?? false;
             }
             // No VehicleId at all means no ownership is possible to prove
             // -- deny for non-staff rather than allow it through.
-            if (!isOwner)
+            if (!isOwner && !isDemoVehicle)
             {
                 return ApiResponse<DeviceEventResponseDto>.Fail(
                     (int)HttpStatusCode.NotFound,

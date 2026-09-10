@@ -64,7 +64,10 @@ public class GpsTrackingService : IGpsTrackingService
                 }
             }
 
-            if (!isOwner && !hasAcceptedShare)
+            // NEW -- the one, shared demo vehicle, readable by every customer.
+            bool isDemoVehicle = vehicle?.IsDemoVehicle ?? false;
+
+            if (!isOwner && !hasAcceptedShare && !isDemoVehicle)
             {
                 return ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>.Fail(
                     (int)HttpStatusCode.NotFound,
@@ -149,7 +152,10 @@ public class GpsTrackingService : IGpsTrackingService
                 }
             }
 
-            if (!isOwner && !hasAcceptedShare)
+            // NEW -- the one, shared demo vehicle, readable by every customer.
+            bool isDemoVehicle = vehicle?.IsDemoVehicle ?? false;
+
+            if (!isOwner && !hasAcceptedShare && !isDemoVehicle)
             {
                 return ApiResponse<TripsReportResponseDto>.Fail(
                     (int)HttpStatusCode.NotFound,

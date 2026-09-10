@@ -79,6 +79,10 @@ public class CurrentLocationService : ICurrentLocationService
         var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId);
         if (vehicle is null) return false;
 
+        // NEW -- the one, shared demo vehicle, readable by every customer
+        // regardless of ownership/sharing records.
+        if (vehicle.IsDemoVehicle) return true;
+
         if (string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal))
         {
             return true;

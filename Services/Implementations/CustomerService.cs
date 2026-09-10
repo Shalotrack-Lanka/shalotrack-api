@@ -307,6 +307,37 @@ public class CustomerService : ICustomerService
         dashboard.OnlineVehicles = dashboard.Vehicles.Count(v => v.Online);
         dashboard.OfflineVehicles = dashboard.VehicleCount - dashboard.OnlineVehicles;
 
+        // NEW -- the one, shared demo vehicle, visible to every customer
+        // regardless of ownership/sharing records at all. Skipped if
+        // already present (the recorded owner-of-record would otherwise
+        // see it twice, once from their own owned-vehicle query above,
+        // once from this merge).
+        var demoVehicle = await _unitOfWork.Vehicles.GetDemoVehicleAsync();
+        if (demoVehicle is not null && dashboard.Vehicles.All(v => v.VehicleId != demoVehicle.VehicleId))
+        {
+            dashboard.Vehicles.Add(new DashboardVehicleDto
+            {
+                VehicleId = demoVehicle.VehicleId,
+                VehicleNumber = demoVehicle.VehicleNumber,
+                Make = demoVehicle.Make,
+                Model = demoVehicle.Model,
+                VehicleType = demoVehicle.VehicleType,
+                DeviceId = demoVehicle.CurrentLocation?.DeviceId,
+                Latitude = demoVehicle.CurrentLocation?.Latitude,
+                Longitude = demoVehicle.CurrentLocation?.Longitude,
+                Speed = demoVehicle.CurrentLocation?.Speed ?? 0,
+                Heading = demoVehicle.CurrentLocation?.Heading ?? 0,
+                Online = demoVehicle.CurrentLocation != null && demoVehicle.CurrentLocation.LastUpdate >= onlineThreshold,
+                Ignition = demoVehicle.CurrentLocation != null && demoVehicle.CurrentLocation.IgnitionStatus,
+                LastUpdate = demoVehicle.CurrentLocation?.LastUpdate,
+                IsDemo = true
+            });
+
+            dashboard.VehicleCount = dashboard.Vehicles.Count;
+            dashboard.OnlineVehicles = dashboard.Vehicles.Count(v => v.Online);
+            dashboard.OfflineVehicles = dashboard.VehicleCount - dashboard.OnlineVehicles;
+        }
+
         return ApiResponse<DashboardResponseDto>.Ok(
             dashboard,
             "Dashboard retrieved successfully.");

@@ -20,6 +20,10 @@ public interface IVehicleRepository
 
     Task<Vehicle?> GetByVehicleNumberAsync(string vehicleNumber);
 
+    // NEW -- the one, shared demo vehicle visible to every customer.
+    // Null if none has been designated yet.
+    Task<Vehicle?> GetDemoVehicleAsync();
+
     Task<Vehicle?> GetByChassisNumberAsync(string chassisNumber);
 
     Task<Vehicle?> GetByEngineNumberAsync(string engineNumber);

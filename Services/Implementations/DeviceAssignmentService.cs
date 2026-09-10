@@ -123,6 +123,17 @@ public class DeviceAssignmentService : IDeviceAssignmentService
             );
         }
 
+        // NEW -- the shared demo vehicle is staff-managed only, even for
+        // whoever the recorded owner happens to be.
+        if (vehicle.IsDemoVehicle && !_currentUser.IsStaff)
+        {
+            return ApiResponse<DeviceAssignmentResponseDto>.Fail(
+                (int)HttpStatusCode.Forbidden,
+                "Demo vehicle is read-only.",
+                "This is the shared demo vehicle and its device can't be changed."
+            );
+        }
+
         if (!await _unitOfWork.GpsDevices.ExistsAsync(dto.DeviceId))
         {
             return ApiResponse<DeviceAssignmentResponseDto>.Fail(
@@ -241,6 +252,17 @@ public class DeviceAssignmentService : IDeviceAssignmentService
                 (int)HttpStatusCode.NotFound,
                 "Assignment not found.",
                 "The specified assignment does not exist."
+            );
+        }
+
+        // NEW -- same reasoning as AssignAsync. vehicle can be null here
+        // (an orphaned assignment row), hence the null-safe check.
+        if ((vehicle?.IsDemoVehicle ?? false) && !_currentUser.IsStaff)
+        {
+            return ApiResponse<string>.Fail(
+                (int)HttpStatusCode.Forbidden,
+                "Demo vehicle is read-only.",
+                "This is the shared demo vehicle and its device can't be changed."
             );
         }
 

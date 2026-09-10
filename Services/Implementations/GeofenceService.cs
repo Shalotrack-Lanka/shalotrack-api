@@ -47,6 +47,18 @@ public class GeofenceService : IGeofenceService
             dtoList.AddRange(ownerGeofences.Select(g => ToDto(g, isOwner: false)));
         }
 
+        // NEW -- the shared demo vehicle's geofences (if any) are visible
+        // to every customer too, same reasoning as the shared-vehicle
+        // merge above. Skipped for whoever the demo vehicle's actual
+        // recorded owner is, since their own geofences are already
+        // included via ownGeofences above.
+        var demoVehicle = await _unitOfWork.Vehicles.GetDemoVehicleAsync();
+        if (demoVehicle is not null && demoVehicle.CustomerId != customer.CustomerId)
+        {
+            var demoGeofences = await _unitOfWork.Geofences.GetForVehicleAsync(demoVehicle.CustomerId, demoVehicle.VehicleId);
+            dtoList.AddRange(demoGeofences.Select(g => ToDto(g, isOwner: false)));
+        }
+
         return ApiResponse<IReadOnlyList<GeofenceResponseDto>>.Ok(dtoList, "Geofences retrieved successfully.");
     }
 

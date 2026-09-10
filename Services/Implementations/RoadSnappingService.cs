@@ -77,7 +77,7 @@ public class RoadSnappingService : IRoadSnappingService
             }
         }
 
-        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare)
+        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare && !vehicle.IsDemoVehicle)
         {
             return ApiResponse<IReadOnlyList<SnappedPointDto>>.Fail(
                 (int)HttpStatusCode.NotFound,

@@ -28,4 +28,11 @@ public class DashboardVehicleDto
     // modify or remove someone else's vehicle.
     public bool IsShared { get; set; }
     public string? OwnerName { get; set; }
+
+    // NEW -- the one, shared demo vehicle visible to every customer.
+    // Android uses this the same way it already uses IsShared: to hide
+    // owner-only actions (edit, delete, link/unlink device, engine cut)
+    // for this specific vehicle, regardless of who the calling customer
+    // actually is.
+    public bool IsDemo { get; set; }
 }

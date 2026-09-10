@@ -68,8 +68,12 @@ public class DeviceStatusService : IDeviceStatusService
         if (vehicleId is null) return false;
 
         var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId.Value);
-        return vehicle is not null &&
-               string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
+        if (vehicle is null) return false;
+
+        // NEW -- the one, shared demo vehicle, readable by every customer.
+        if (vehicle.IsDemoVehicle) return true;
+
+        return string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
     }
 
     private static ApiResponse<DeviceStatusResponseDto> NotFound() =>

@@ -63,7 +63,7 @@ public class VehicleStatsService : IVehicleStatsService
             hasAcceptedShare = share is not null && share.Status == VehicleShareStatus.Accepted;
         }
 
-        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare)
+        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare && !vehicle.IsDemoVehicle)
         {
             return ApiResponse<VehicleStatsResponseDto>.Fail(
                 (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'.");
