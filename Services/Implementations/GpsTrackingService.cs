@@ -276,7 +276,62 @@ public class GpsTrackingService : IGpsTrackingService
             }
         }
 
-        // Window ended mid-trip — close it as "in progress."
+        // ── Ignition-off gap fix ──────────────────────────────────────────────
+        //
+        // When a device goes silent after ignition-off, no new stationary points
+        // arrive so the 5-minute stop threshold is never reached by the foreach
+        // loop above. The trip stays open and would be marked "in progress" —
+        // then disappears on the next query refresh because the window moves on.
+        //
+        // Fix: after the loop, if we have an open trip AND the last known point
+        // was stationary AND more than 5 minutes have elapsed between that last
+        // point and the query window end — the vehicle has clearly stopped.
+        // Close the trip as completed (inProgress: false), not in-progress.
+        //
+        // This correctly handles:
+        //   - Ignition-off mid-query  (device goes silent, time passes)
+        //   - Short trips with no trailing stationary GPS points
+        //   - Any case where the device stops transmitting before the stop
+        //     threshold accumulates inside the dataset
+        if (tripStart is not null &&
+            lastMovingPoint is not null &&
+            lastStationaryPoint is not null)
+        {
+            var timeSinceLastPoint = to - lastStationaryPoint.EventTime;
+            if (timeSinceLastPoint >= stopThreshold)
+            {
+                double displacementMeters = HaversineMeters(
+                    (double)tripStart.Latitude, (double)tripStart.Longitude,
+                    (double)lastMovingPoint.Latitude, (double)lastMovingPoint.Longitude);
+
+                if (displacementMeters >= minTripDisplacementMeters)
+                {
+                    decimal avgSpeed = tripSpeedPointCount > 0
+                        ? tripSpeedSum / tripSpeedPointCount
+                        : 0;
+
+                    trips.Add(BuildTripSummary(
+                        tripStart,
+                        lastMovingPoint,
+                        tripDistanceMeters,
+                        tripMaxSpeed,
+                        avgSpeed,
+                        inProgress: false));
+                }
+
+                tripStart = null;
+                lastMovingPoint = null;
+                previousPointInTrip = null;
+                tripDistanceMeters = 0;
+                tripMaxSpeed = 0;
+                tripSpeedSum = 0;
+                tripSpeedPointCount = 0;
+            }
+        }
+
+        // Window ended mid-trip — vehicle is genuinely still moving at query time.
+        // Only reached if the ignition-off gap fix above did not close the trip
+        // (i.e. the device is still actively transmitting and moving right now).
         if (tripStart is not null && lastMovingPoint is not null)
         {
             double displacementMeters = HaversineMeters(
