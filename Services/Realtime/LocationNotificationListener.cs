@@ -148,10 +148,42 @@ public class LocationNotificationListener : BackgroundService
             }
             catch (OperationCanceledException)
             {
+                // Graceful shutdown — do not retry.
                 break;
+            }
+            catch (PostgresException ex) when (ex.SqlState == "28P01")
+            {
+                // BAN FIX: Authentication failure. Retrying will hammer Supabase
+                // with more bad-password attempts and trigger the Fail2ban
+                // circuit-breaker, resulting in a full IP ban on the EC2.
+                // Root cause of the September 2026 production IP ban incident.
+                // Stop immediately. Fix the realtime_connection_string in AWS SSM
+                // Parameter Store and trigger an ASG instance refresh to recover.
+                _logger.LogCritical(ex,
+                    "LocationNotificationListener: DB authentication failed (SqlState=28P01). " +
+                    "Halting all retries to prevent Supabase IP ban. " +
+                    "Fix /shalotrack/prod/api/realtime_connection_string in SSM and redeploy.");
+                return;
+            }
+            catch (PostgresException ex) when (ex.SqlState == "XX000"
+                && ex.Message.Contains("ECIRCUITBREAKER"))
+            {
+                // BAN FIX: Supabase circuit breaker already fired — IP ban is
+                // imminent or already active. Any further connection attempt
+                // from this IP will be rejected by Fail2ban. Stop immediately.
+                // Remove the banned IP from the Supabase dashboard and fix the
+                // DB password in SSM before redeploying.
+                _logger.LogCritical(ex,
+                    "LocationNotificationListener: Supabase ECIRCUITBREAKER triggered — " +
+                    "too many authentication failures. IP ban is active or imminent. " +
+                    "Stopping all retries. Fix the DB password in SSM and remove the " +
+                    "banned IP from the Supabase dashboard before redeploying.");
+                return;
             }
             catch (Exception ex)
             {
+                // Transient connection loss (network blip, Supabase restart, etc.)
+                // — safe to retry after a short delay.
                 _logger.LogError(ex, "LocationNotificationListener: connection lost, retrying in 5s.");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }

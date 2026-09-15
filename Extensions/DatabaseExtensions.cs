@@ -24,6 +24,11 @@ public static class DatabaseExtensions
                     // Core queues and waits cleanly instead of hanging.
                     // CommandTimeout: 30s — prevents a slow/locked query from
                     // tying up a connection indefinitely.
+                    //
+                    // NOTE: MaxPoolSize is set via the connection string in SSM
+                    // ("Maximum Pool Size=10") not here — NpgsqlDbContextOptionsBuilder
+                    // does not expose a MaxPoolSize method. CommandTimeout is
+                    // the only Npgsql-specific option set at the EF Core level.
                     npgsqlOptions.CommandTimeout(30);
                 })
             .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
@@ -34,6 +39,8 @@ public static class DatabaseExtensions
         // Supabase allows, causing new requests to hang waiting for a slot
         // that will never be freed. 10 leaves headroom for the persistent
         // RealtimeConnection used by LocationNotificationListener.
+        // Applied via "Maximum Pool Size=10" in the SSM connection string,
+        // not here — NpgsqlDbContextOptionsBuilder does not expose this.
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", false);
 
         return services;
