@@ -46,6 +46,23 @@ builder.Services.AddSwaggerDocumentation();
 // Policy details in Extensions/RateLimitingExtensions.cs.
 builder.Services.AddShaloTrackRateLimiting();
 
+// ---- CORS ----
+// Allows the customer web portal to make authenticated requests and
+// establish SignalR WebSocket connections from the browser.
+// WithOrigins() is explicit — AllowAnyOrigin() is intentionally NOT used
+// because it is incompatible with AllowCredentials() and would silently
+// break SignalR WebSocket negotiation in all browsers.
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("CustomerPortal", policy =>
+    {
+        policy.WithOrigins("https://fleet.shalotrack.com")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials(); // Required for SignalR WebSocket handshake
+    });
+});
+
 // ---- AUTH ----
 var firebaseProjectId = builder.Configuration["Firebase:ProjectId"]
     ?? throw new InvalidOperationException("Firebase:ProjectId is not configured.");
@@ -64,6 +81,7 @@ builder.Services
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2)
         };
+
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -222,6 +240,12 @@ app.UseSwaggerDocumentation(app.Environment);
 app.UseRateLimiter();
 
 app.UseMiddleware<AdminSyncKeyMiddleware>();
+
+// CORS must come after AdminSyncKeyMiddleware and before Authentication.
+// OPTIONS preflight requests must be answered before auth runs — a preflight
+// that hits UseAuthentication() returns 401, which breaks every non-simple
+// browser request including SignalR negotiate.
+app.UseCors("CustomerPortal");
 
 app.UseAuthentication();
 app.UseAuthorization();
