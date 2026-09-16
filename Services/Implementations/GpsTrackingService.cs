@@ -1,4 +1,7 @@
 ﻿using System.Net;
+using System.Text.Json;
+using Amazon.S3;
+using Amazon.S3.Model;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.GpsTracking;
 using ShaloTrack_API.Enums;
@@ -9,28 +12,53 @@ using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Services.Implementations;
 
+/// <summary>
+/// Serves GPS tracking history and trip summaries.
+///
+/// READ STRATEGY — S3 read-through fallback (Phase 3c):
+///   1. Query Supabase (live/recent rows, DryRun=true state).
+///   2. If Supabase returns zero points AND S3 is configured, list the
+///      matching archive files from S3 and merge their GeoJSON points.
+///   3. Run the identical trip-detection algorithm over the merged set.
+///
+/// This makes GetTripsSummaryAsync correct regardless of whether
+/// GpsArchive:PurgeDryRun is true or false.
+/// </summary>
 public class GpsTrackingService : IGpsTrackingService
 {
     private readonly IGpsTrackingRepository _repository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
+    private readonly IAmazonS3 _s3Client;
+    private readonly string? _bucketName;
+    private readonly ILogger<GpsTrackingService> _logger;
 
-    // PERFORMANCE FIX: Hard cap on the date range for trip report queries.
-    // GetPointsForTripsAsync is unbounded — a 30-day query loads ~43,000
-    // GPS points into C# RAM, walks every one in a loop, then discards them.
-    // 7 days = ~10,000 points per vehicle — a reasonable upper bound that
-    // covers weekly fleet reviews without risking memory exhaustion on t3.micro.
-    // Clients needing longer ranges make multiple calls.
+    // PERFORMANCE: Hard cap on date range for trip queries.
+    // 90 days = ~130,000 points worst-case on t3.micro — acceptable ceiling.
+    // Android fetches in 30-day chunks so this is a safety net, not the norm.
     private const int MaxTripReportDays = 90;
+
+    // S3 archive path prefix — must match TripArchivalService.BuildS3Key exactly.
+    // Format: archive/{deviceId}/{year}/{month}/{startZ}_{endZ}.json
+    private const string S3ArchivePrefix = "archive/";
 
     public GpsTrackingService(
         IGpsTrackingRepository repository,
         IUnitOfWork unitOfWork,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        IAmazonS3 s3Client,
+        IConfiguration configuration,
+        ILogger<GpsTrackingService> logger)
     {
         _repository = repository;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _s3Client = s3Client;
+        _logger = logger;
+
+        // Null-safe — if not configured, S3 fallback is silently skipped.
+        // This keeps the service functional even when deployed without S3 config.
+        _bucketName = configuration["GpsArchive:BucketName"];
     }
 
     public async Task<ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>> GetAsync(
@@ -47,8 +75,6 @@ public class GpsTrackingService : IGpsTrackingService
 
         if (!_currentUser.IsStaff)
         {
-            // PERFORMANCE FIX: use GetByIdForOwnershipCheckAsync (loads Customer
-            // only) instead of GetByIdAsync (loads full DeviceAssignment history).
             var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(filter.VehicleId.Value);
             bool isOwner = vehicle is not null &&
                 string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
@@ -64,7 +90,6 @@ public class GpsTrackingService : IGpsTrackingService
                 }
             }
 
-            // NEW -- the one, shared demo vehicle, readable by every customer.
             bool isDemoVehicle = vehicle?.IsDemoVehicle ?? false;
 
             if (!isOwner && !hasAcceptedShare && !isDemoVehicle)
@@ -88,19 +113,11 @@ public class GpsTrackingService : IGpsTrackingService
 
     /// <summary>
     /// Computes trip and stop reports for a vehicle over a date range.
-    ///
-    /// A "stop" is 5+ continuous minutes stationary — recorded as an individual
-    /// StopSummaryDto (location + full duration), not just a count.
-    ///
-    /// A "trip" additionally requires at least 100m of straight-line displacement
-    /// between its start and end (filters GPS jitter while parked from being
-    /// misread as a trip). Each trip also carries DistanceKm (real route distance,
-    /// summed point-to-point) and MaxSpeed/AvgSpeed for the Speed report tab.
-    ///
-    /// PERFORMANCE: date range is capped at MaxTripReportDays (90 days).
-    /// Clients needing longer ranges make multiple calls with different windows.
+    /// Falls back to S3 archive when Supabase has no rows for the window
+    /// (i.e. GpsArchive:PurgeDryRun=false has deleted them after archival).
     /// </summary>
-    public async Task<ApiResponse<TripsReportResponseDto>> GetTripsSummaryAsync(Guid vehicleId, DateTime from, DateTime to)
+    public async Task<ApiResponse<TripsReportResponseDto>> GetTripsSummaryAsync(
+        Guid vehicleId, DateTime from, DateTime to)
     {
         if (vehicleId == Guid.Empty)
         {
@@ -120,9 +137,6 @@ public class GpsTrackingService : IGpsTrackingService
             );
         }
 
-        // PERFORMANCE FIX: enforce the date range cap server-side.
-        // A 30-day trip report loads ~43,000 points into C# memory. Cap at
-        // 7 days to keep memory use predictable and response times acceptable.
         if ((to - from).TotalDays > MaxTripReportDays)
         {
             return ApiResponse<TripsReportResponseDto>.Fail(
@@ -133,10 +147,11 @@ public class GpsTrackingService : IGpsTrackingService
             );
         }
 
+        // ── Ownership check ──────────────────────────────────────────────────
+        Guid? resolvedDeviceId = null;
+
         if (!_currentUser.IsStaff)
         {
-            // PERFORMANCE FIX: use GetByIdForOwnershipCheckAsync (loads Customer
-            // only) instead of GetByIdAsync (loads full DeviceAssignment history).
             var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId);
             bool isOwner = vehicle is not null &&
                 string.Equals(vehicle.Customer?.FirebaseUid, _currentUser.FirebaseUid, StringComparison.Ordinal);
@@ -152,7 +167,6 @@ public class GpsTrackingService : IGpsTrackingService
                 }
             }
 
-            // NEW -- the one, shared demo vehicle, readable by every customer.
             bool isDemoVehicle = vehicle?.IsDemoVehicle ?? false;
 
             if (!isOwner && !hasAcceptedShare && !isDemoVehicle)
@@ -164,8 +178,268 @@ public class GpsTrackingService : IGpsTrackingService
             }
         }
 
+        // ── Step 1: Query Supabase ───────────────────────────────────────────
         var points = await _repository.GetPointsForTripsAsync(vehicleId, from, to);
 
+        // ── Step 2: S3 read-through fallback ────────────────────────────────
+        // Triggered only when Supabase returned zero points. This happens when
+        // GpsArchive:PurgeDryRun=false has deleted rows after archiving to S3.
+        if (points.Count == 0 && !string.IsNullOrEmpty(_bucketName))
+        {
+            _logger.LogInformation(
+                "GpsTrackingService: Supabase returned 0 points for vehicle {VehicleId} in [{From}, {To}]. " +
+                "Attempting S3 archive fallback.",
+                vehicleId, from, to);
+
+            // Resolve the active DeviceId for this vehicle — needed to build
+            // the S3 prefix. S3 archives are keyed by DeviceId, not VehicleId.
+            var assignment = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+            var activeAssignment = assignment?.DeviceAssignments?
+                .FirstOrDefault(a => a.Status == AssignmentStatus.Active);
+
+            if (activeAssignment is not null)
+            {
+                resolvedDeviceId = activeAssignment.DeviceId;
+                var s3Points = await ReadPointsFromS3Async(resolvedDeviceId.Value, from, to);
+
+                if (s3Points.Count > 0)
+                {
+                    _logger.LogInformation(
+                        "GpsTrackingService: S3 fallback loaded {Count} point(s) for device {DeviceId}.",
+                        s3Points.Count, resolvedDeviceId.Value);
+                    points = s3Points;
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "GpsTrackingService: S3 fallback also returned 0 points for device {DeviceId} in [{From}, {To}].",
+                        resolvedDeviceId.Value, from, to);
+                }
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "GpsTrackingService: Could not resolve active DeviceId for vehicle {VehicleId} — S3 fallback skipped.",
+                    vehicleId);
+            }
+        }
+
+        // ── Step 3: Trip detection (identical algorithm regardless of source) ─
+        return ApiResponse<TripsReportResponseDto>.Ok(
+            ComputeTripsReport(vehicleId, from, to, points),
+            "Trips summary retrieved successfully.");
+    }
+
+    // ── S3 Archive Reader ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Lists all archive files for the given device that overlap the [from, to]
+    /// window, downloads each one, deserialises the GeoJSON features, and returns
+    /// a flat chronologically-ordered list of TrackingPointRaw.
+    ///
+    /// S3 key format (must match TripArchivalService.BuildS3Key):
+    ///   archive/{deviceId}/{year}/{month}/{startZ}_{endZ}.json
+    ///
+    /// The month-level prefix is enumerated for every calendar month in the
+    /// requested window so no files are missed across month boundaries.
+    /// </summary>
+    private async Task<List<TrackingPointRaw>> ReadPointsFromS3Async(
+        Guid deviceId, DateTime from, DateTime to)
+    {
+        var allPoints = new List<TrackingPointRaw>();
+
+        // Build the set of year/month prefixes that overlap the window.
+        // A 30-day window crossing a month boundary needs two prefixes.
+        var prefixes = new HashSet<string>();
+        var cursor = new DateTime(from.Year, from.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        while (cursor <= to)
+        {
+            prefixes.Add($"{S3ArchivePrefix}{deviceId}/{cursor:yyyy}/{cursor:MM}/");
+            cursor = cursor.AddMonths(1);
+        }
+
+        foreach (var prefix in prefixes.OrderBy(p => p))
+        {
+            List<S3Object> objects;
+            try
+            {
+                var listRequest = new ListObjectsV2Request
+                {
+                    BucketName = _bucketName,
+                    Prefix = prefix
+                };
+                var listResponse = await _s3Client.ListObjectsV2Async(listRequest);
+                objects = listResponse.S3Objects;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "GpsTrackingService: S3 ListObjects failed for prefix {Prefix}.", prefix);
+                continue;
+            }
+
+            foreach (var obj in objects)
+            {
+                // Parse the trip window from the filename so we can skip files
+                // that don't overlap the requested range without downloading them.
+                // Filename format: {startZ}_{endZ}.json
+                // e.g. 20260915T112119Z_20260915T112126Z.json
+                var fileName = obj.Key.Split('/').Last();
+                if (!TryParseTripWindow(fileName, out var fileStart, out var fileEnd))
+                {
+                    _logger.LogWarning(
+                        "GpsTrackingService: Could not parse trip window from S3 key {Key} — skipping.",
+                        obj.Key);
+                    continue;
+                }
+
+                // Skip files whose trip window doesn't overlap [from, to]
+                if (fileEnd < from || fileStart > to) continue;
+
+                try
+                {
+                    var getRequest = new GetObjectRequest
+                    {
+                        BucketName = _bucketName,
+                        Key = obj.Key
+                    };
+
+                    using var getResponse = await _s3Client.GetObjectAsync(getRequest);
+                    using var reader = new StreamReader(getResponse.ResponseStream);
+                    var json = await reader.ReadToEndAsync();
+
+                    var points = DeserialiseGeoJsonPoints(json, from, to);
+                    allPoints.AddRange(points);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "GpsTrackingService: Failed to download or parse S3 object {Key}.", obj.Key);
+                }
+            }
+        }
+
+        // Chronological order — identical to what GetPointsForTripsAsync returns
+        allPoints.Sort((a, b) => a.EventTime.CompareTo(b.EventTime));
+        return allPoints;
+    }
+
+    /// <summary>
+    /// Parses the trip window from an archive filename.
+    /// Format: 20260915T112119Z_20260915T112126Z.json
+    /// </summary>
+    private static bool TryParseTripWindow(string fileName, out DateTime start, out DateTime end)
+    {
+        start = default;
+        end = default;
+
+        // Strip .json extension
+        var name = fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+            ? fileName[..^5]
+            : fileName;
+
+        var parts = name.Split('_');
+        if (parts.Length != 2) return false;
+
+        const string fmt = "yyyyMMddTHHmmssZ";
+        return DateTime.TryParseExact(parts[0], fmt,
+                   System.Globalization.CultureInfo.InvariantCulture,
+                   System.Globalization.DateTimeStyles.AssumeUniversal |
+                   System.Globalization.DateTimeStyles.AdjustToUniversal,
+                   out start)
+               && DateTime.TryParseExact(parts[1], fmt,
+                   System.Globalization.CultureInfo.InvariantCulture,
+                   System.Globalization.DateTimeStyles.AssumeUniversal |
+                   System.Globalization.DateTimeStyles.AdjustToUniversal,
+                   out end);
+    }
+
+    /// <summary>
+    /// Deserialises a GeoJSON FeatureCollection produced by TripArchivalService
+    /// into TrackingPointRaw instances, filtered to [from, to].
+    ///
+    /// Expected structure:
+    /// {
+    ///   "type": "FeatureCollection",
+    ///   "features": [
+    ///     {
+    ///       "type": "Feature",
+    ///       "geometry": { "type": "Point", "coordinates": [lon, lat] },
+    ///       "properties": { "EventTime": "...", "Speed": 42.5, "MovementStatus": true }
+    ///     }
+    ///   ]
+    /// }
+    /// </summary>
+    private List<TrackingPointRaw> DeserialiseGeoJsonPoints(string json, DateTime from, DateTime to)
+    {
+        var points = new List<TrackingPointRaw>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("features", out var features)) return points;
+
+            foreach (var feature in features.EnumerateArray())
+            {
+                try
+                {
+                    // Coordinates: [longitude, latitude] — GeoJSON spec order
+                    var coords = feature
+                        .GetProperty("geometry")
+                        .GetProperty("coordinates");
+
+                    var lon = coords[0].GetDouble();
+                    var lat = coords[1].GetDouble();
+
+                    var props = feature.GetProperty("properties");
+
+                    if (!props.TryGetProperty("EventTime", out var eventTimeProp)) continue;
+                    if (!DateTime.TryParse(eventTimeProp.GetString(),
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.AssumeUniversal |
+                            System.Globalization.DateTimeStyles.AdjustToUniversal,
+                            out var eventTime)) continue;
+
+                    // Only include points inside the requested window
+                    if (eventTime < from || eventTime > to) continue;
+
+                    var speed = props.TryGetProperty("Speed", out var speedProp)
+                        ? (decimal)speedProp.GetDouble()
+                        : 0m;
+
+                    points.Add(new TrackingPointRaw
+                    {
+                        EventTime = eventTime,
+                        Latitude = (decimal)lat,
+                        Longitude = (decimal)lon,
+                        Speed = speed
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "GpsTrackingService: Skipping malformed GeoJSON feature during S3 deserialisation.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GpsTrackingService: Failed to parse GeoJSON from S3.");
+        }
+
+        return points;
+    }
+
+    // ── Trip detection algorithm ─────────────────────────────────────────────
+    // Extracted into its own method so it runs identically over Supabase
+    // points and S3-sourced points — single source of truth, no duplication.
+
+    private static TripsReportResponseDto ComputeTripsReport(
+        Guid vehicleId, DateTime from, DateTime to,
+        List<TrackingPointRaw> points)
+    {
         const decimal speedThresholdKmh = 2m;
         const double minTripDisplacementMeters = 100;
         var stopThreshold = TimeSpan.FromMinutes(5);
@@ -174,7 +448,6 @@ public class GpsTrackingService : IGpsTrackingService
         var stops = new List<StopSummaryDto>();
         int stopCount = 0;
 
-        // Trip tracking state
         TrackingPointRaw? tripStart = null;
         TrackingPointRaw? lastMovingPoint = null;
         TrackingPointRaw? previousPointInTrip = null;
@@ -183,7 +456,6 @@ public class GpsTrackingService : IGpsTrackingService
         decimal tripSpeedSum = 0;
         int tripSpeedPointCount = 0;
 
-        // Stop tracking state
         DateTime? stationarySince = null;
         TrackingPointRaw? stopStartPoint = null;
         TrackingPointRaw? lastStationaryPoint = null;
@@ -195,11 +467,9 @@ public class GpsTrackingService : IGpsTrackingService
 
             if (isMoving)
             {
-                // Movement resumed — finalize any qualifying stop that just ended.
                 if (stopStartPoint is not null && stopAlreadyCounted)
-                {
                     stops.Add(BuildStopSummary(stopStartPoint, lastStationaryPoint!, inProgress: false));
-                }
+
                 stopStartPoint = null;
                 lastStationaryPoint = null;
                 stationarySince = null;
@@ -229,9 +499,6 @@ public class GpsTrackingService : IGpsTrackingService
             }
             else
             {
-                // Sub-threshold stationary point while a trip is open — still counts
-                // toward the trip's distance/speed stats (a brief idle moment
-                // shouldn't break the trip).
                 if (tripStart is not null && previousPointInTrip is not null)
                 {
                     tripDistanceMeters += HaversineMeters(
@@ -254,14 +521,15 @@ public class GpsTrackingService : IGpsTrackingService
 
                     if (tripStart is not null && lastMovingPoint is not null)
                     {
-                        double displacementMeters = HaversineMeters(
+                        double displacement = HaversineMeters(
                             (double)tripStart.Latitude, (double)tripStart.Longitude,
                             (double)lastMovingPoint.Latitude, (double)lastMovingPoint.Longitude);
 
-                        if (displacementMeters >= minTripDisplacementMeters)
+                        if (displacement >= minTripDisplacementMeters)
                         {
-                            decimal avgSpeed = tripSpeedPointCount > 0 ? tripSpeedSum / tripSpeedPointCount : 0;
-                            trips.Add(BuildTripSummary(tripStart, lastMovingPoint, tripDistanceMeters, tripMaxSpeed, avgSpeed, inProgress: false));
+                            decimal avg = tripSpeedPointCount > 0 ? tripSpeedSum / tripSpeedPointCount : 0;
+                            trips.Add(BuildTripSummary(tripStart, lastMovingPoint,
+                                tripDistanceMeters, tripMaxSpeed, avg, inProgress: false));
                         }
 
                         tripStart = null;
@@ -276,82 +544,48 @@ public class GpsTrackingService : IGpsTrackingService
             }
         }
 
-        // ── Ignition-off gap fix ──────────────────────────────────────────────
-        //
-        // When a device goes silent after ignition-off, no new stationary points
-        // arrive so the 5-minute stop threshold is never reached by the foreach
-        // loop above. The trip stays open and would be marked "in progress" —
-        // then disappears on the next query refresh because the window moves on.
-        //
-        // Fix: after the loop, if we have an open trip AND the last known point
-        // was stationary AND more than 5 minutes have elapsed between that last
-        // point and the query window end — the vehicle has clearly stopped.
-        // Close the trip as completed (inProgress: false), not in-progress.
-        //
-        // This correctly handles:
-        //   - Ignition-off mid-query  (device goes silent, time passes)
-        //   - Short trips with no trailing stationary GPS points
-        //   - Any case where the device stops transmitting before the stop
-        //     threshold accumulates inside the dataset
-        if (tripStart is not null &&
-            lastMovingPoint is not null &&
-            lastStationaryPoint is not null)
+        // Ignition-off gap fix — device goes silent after engine off
+        if (tripStart is not null && lastMovingPoint is not null && lastStationaryPoint is not null)
         {
             var timeSinceLastPoint = to - lastStationaryPoint.EventTime;
             if (timeSinceLastPoint >= stopThreshold)
             {
-                double displacementMeters = HaversineMeters(
+                double displacement = HaversineMeters(
                     (double)tripStart.Latitude, (double)tripStart.Longitude,
                     (double)lastMovingPoint.Latitude, (double)lastMovingPoint.Longitude);
 
-                if (displacementMeters >= minTripDisplacementMeters)
+                if (displacement >= minTripDisplacementMeters)
                 {
-                    decimal avgSpeed = tripSpeedPointCount > 0
-                        ? tripSpeedSum / tripSpeedPointCount
-                        : 0;
-
-                    trips.Add(BuildTripSummary(
-                        tripStart,
-                        lastMovingPoint,
-                        tripDistanceMeters,
-                        tripMaxSpeed,
-                        avgSpeed,
-                        inProgress: false));
+                    decimal avg = tripSpeedPointCount > 0 ? tripSpeedSum / tripSpeedPointCount : 0;
+                    trips.Add(BuildTripSummary(tripStart, lastMovingPoint,
+                        tripDistanceMeters, tripMaxSpeed, avg, inProgress: false));
                 }
 
                 tripStart = null;
                 lastMovingPoint = null;
-                previousPointInTrip = null;
-                tripDistanceMeters = 0;
-                tripMaxSpeed = 0;
-                tripSpeedSum = 0;
-                tripSpeedPointCount = 0;
             }
         }
 
-        // Window ended mid-trip — vehicle is genuinely still moving at query time.
-        // Only reached if the ignition-off gap fix above did not close the trip
-        // (i.e. the device is still actively transmitting and moving right now).
+        // Still moving at query boundary
         if (tripStart is not null && lastMovingPoint is not null)
         {
-            double displacementMeters = HaversineMeters(
+            double displacement = HaversineMeters(
                 (double)tripStart.Latitude, (double)tripStart.Longitude,
                 (double)lastMovingPoint.Latitude, (double)lastMovingPoint.Longitude);
 
-            if (displacementMeters >= minTripDisplacementMeters)
+            if (displacement >= minTripDisplacementMeters)
             {
-                decimal avgSpeed = tripSpeedPointCount > 0 ? tripSpeedSum / tripSpeedPointCount : 0;
-                trips.Add(BuildTripSummary(tripStart, lastMovingPoint, tripDistanceMeters, tripMaxSpeed, avgSpeed, inProgress: true));
+                decimal avg = tripSpeedPointCount > 0 ? tripSpeedSum / tripSpeedPointCount : 0;
+                trips.Add(BuildTripSummary(tripStart, lastMovingPoint,
+                    tripDistanceMeters, tripMaxSpeed, avg, inProgress: true));
             }
         }
 
-        // Window ended mid-stop — close it as "in progress."
+        // Stop still in progress at query boundary
         if (stopStartPoint is not null && stopAlreadyCounted)
-        {
             stops.Add(BuildStopSummary(stopStartPoint, lastStationaryPoint!, inProgress: true));
-        }
 
-        var report = new TripsReportResponseDto
+        return new TripsReportResponseDto
         {
             VehicleId = vehicleId,
             From = from,
@@ -361,15 +595,11 @@ public class GpsTrackingService : IGpsTrackingService
             Trips = trips,
             Stops = stops
         };
-
-        return ApiResponse<TripsReportResponseDto>.Ok(report, "Trips summary retrieved successfully.");
     }
 
     private static TripSummaryDto BuildTripSummary(
         TrackingPointRaw start, TrackingPointRaw end, double distanceMeters,
-        decimal maxSpeed, decimal avgSpeed, bool inProgress)
-    {
-        return new TripSummaryDto
+        decimal maxSpeed, decimal avgSpeed, bool inProgress) => new()
         {
             StartTime = start.EventTime,
             EndTime = end.EventTime,
@@ -383,11 +613,9 @@ public class GpsTrackingService : IGpsTrackingService
             AvgSpeed = avgSpeed,
             InProgress = inProgress
         };
-    }
 
-    private static StopSummaryDto BuildStopSummary(TrackingPointRaw start, TrackingPointRaw end, bool inProgress)
-    {
-        return new StopSummaryDto
+    private static StopSummaryDto BuildStopSummary(
+        TrackingPointRaw start, TrackingPointRaw end, bool inProgress) => new()
         {
             StartTime = start.EventTime,
             EndTime = end.EventTime,
@@ -396,17 +624,15 @@ public class GpsTrackingService : IGpsTrackingService
             DurationMinutes = (decimal)(end.EventTime - start.EventTime).TotalMinutes,
             InProgress = inProgress
         };
-    }
 
     private static double HaversineMeters(double lat1, double lon1, double lat2, double lon2)
     {
-        const double earthRadiusMeters = 6371000;
+        const double R = 6371000;
         double dLat = (lat2 - lat1) * Math.PI / 180;
         double dLon = (lon2 - lon1) * Math.PI / 180;
         double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2)
                  + Math.Cos(lat1 * Math.PI / 180) * Math.Cos(lat2 * Math.PI / 180)
                  * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
-        double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
-        return earthRadiusMeters * c;
+        return R * 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
     }
 }
