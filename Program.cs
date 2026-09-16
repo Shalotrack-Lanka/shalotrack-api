@@ -64,7 +64,6 @@ builder.Services
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2)
         };
-
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
