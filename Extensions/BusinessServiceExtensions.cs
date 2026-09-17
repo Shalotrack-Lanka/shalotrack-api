@@ -23,6 +23,7 @@ public static class BusinessServiceExtensions
         services.AddScoped<ISubscriptionService, SubscriptionService>();   // NEW -- subscription lifecycle
         services.AddScoped<ISavedPlaceService, SavedPlaceService>();
         services.AddScoped<IGeofenceService, GeofenceService>();
+        services.AddScoped<IComplaintService, ComplaintService>();
         services.AddScoped<IVehicleStatsService, VehicleStatsService>();
         // Only implementation of IPaymentProvider today -- no payment
         // gateway merchant account yet. Swap/extend this line when a real

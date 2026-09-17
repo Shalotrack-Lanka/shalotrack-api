@@ -15,6 +15,7 @@ public interface IUnitOfWork
     ISavedPlaceRepository SavedPlaces { get; }
     IVehicleShareRepository VehicleShares { get; }
     IGeofenceRepository Geofences { get; }
+    IComplaintRepository Complaints { get; }
     Task<int> SaveChangesAsync();
     Task BeginTransactionAsync();
     Task CommitTransactionAsync();

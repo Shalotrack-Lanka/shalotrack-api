@@ -49,7 +49,7 @@ builder.Services.AddShaloTrackRateLimiting();
 // ---- CORS ----
 // Allows the customer web portal to make authenticated requests and
 // establish SignalR WebSocket connections from the browser.
-// WithOrigins() is explicit — AllowAnyOrigin() is intentionally NOT used
+// WithOrigins() is explicit -- AllowAnyOrigin() is intentionally NOT used
 // because it is incompatible with AllowCredentials() and would silently
 // break SignalR WebSocket negotiation in all browsers.
 builder.Services.AddCors(options =>
@@ -140,10 +140,30 @@ builder.Services.AddHttpClient("GoogleRoadsApi", client =>
 
 // ---- GATEWAY COMMAND API ----
 // Internal VPC HTTP client for forwarding device commands to the Python gateway.
-// Timeout: 10s — commands must complete within this window or are treated as failed.
+// Timeout: 10s -- commands must complete within this window or are treated as failed.
 builder.Services.AddHttpClient("GatewayCommandClient", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
+});
+
+// ---- ADMIN PORTAL (Complaints -- dealer lookup) ----
+// Outgoing calls FROM this API TO the Laravel admin portal, the reverse
+// direction of the existing customers-sync/vehicles-sync endpoints
+// (which Admin calls INTO this API). Reuses the same shared secret as
+// AdminSyncKeyMiddleware (AdminSync:Key here, SHALOTRACK_SYNC_KEY on
+// Admin's side) rather than introducing a second one -- Admin already
+// validates nothing on its own incoming requests today, so a new
+// Laravel-side middleware is needed there, but the secret itself
+// already exists and is already shared between both systems.
+_ = builder.Configuration["AdminPortal:BaseUrl"]
+    ?? throw new InvalidOperationException(
+        "AdminPortal:BaseUrl is not configured. Must be injected via the " +
+        "AdminPortal__BaseUrl environment variable.");
+
+builder.Services.AddHttpClient("AdminPortal", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["AdminPortal:BaseUrl"]!);
+    client.Timeout = TimeSpan.FromSeconds(8);
 });
 
 // ---- OBSERVABILITY (OTel -> SRE stack) ----
@@ -230,19 +250,19 @@ app.UseExceptionHandler(exceptionHandlerApp =>
 // SECURITY FIX: Swagger locked to Development only.
 // The original code used:
 //   if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
-// — always true, so Swagger was always public. Fixed: env check is inside
+// -- always true, so Swagger was always public. Fixed: env check is inside
 // UseSwaggerDocumentation() and gates on IsDevelopment() only.
 app.UseSwaggerDocumentation(app.Environment);
 
 // SECURITY FIX: Rate limiting middleware.
 // After ForwardedHeaders + exception handler (infrastructure concerns),
-// before auth — abusive requests are dropped before JWT validation runs.
+// before auth -- abusive requests are dropped before JWT validation runs.
 app.UseRateLimiter();
 
 app.UseMiddleware<AdminSyncKeyMiddleware>();
 
 // CORS must come after AdminSyncKeyMiddleware and before Authentication.
-// OPTIONS preflight requests must be answered before auth runs — a preflight
+// OPTIONS preflight requests must be answered before auth runs -- a preflight
 // that hits UseAuthentication() returns 401, which breaks every non-simple
 // browser request including SignalR negotiate.
 app.UseCors("CustomerPortal");
@@ -250,7 +270,7 @@ app.UseCors("CustomerPortal");
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Health check must never be rate-limited — ALB and monitoring hit this
+// Health check must never be rate-limited -- ALB and monitoring hit this
 // constantly. DisableRateLimiting() exempts it from the global policy.
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy", timestamp = DateTime.UtcNow }))
    .AllowAnonymous()

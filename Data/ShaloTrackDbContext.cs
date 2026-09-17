@@ -30,6 +30,8 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<SavedPlace> SavedPlaces => Set<SavedPlace>();
     public DbSet<Geofence> Geofences => Set<Geofence>();
     public DbSet<VehicleShare> VehicleShares => Set<VehicleShare>();
+    public DbSet<Complaint> Complaints => Set<Complaint>();
+    public DbSet<ComplaintReply> ComplaintReplies => Set<ComplaintReply>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -196,5 +198,29 @@ public class ShaloTrackDbContext : DbContext
             .WithMany()
             .HasForeignKey(s => s.SharedWithCustomerId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // Complaints. Same multi-path risk as VehicleShare above, just
+        // one level removed: Complaint.CustomerId is a direct FK to
+        // Customer, but Complaint.VehicleId also leads back to Customer
+        // via Vehicle.CustomerId. Cascade on Vehicle, Restrict on
+        // Customer -- same resolution as VehicleShare, for the same
+        // reason.
+        modelBuilder.Entity<Complaint>()
+            .HasOne(c => c.Vehicle)
+            .WithMany()
+            .HasForeignKey(c => c.VehicleId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Complaint>()
+            .HasOne(c => c.Customer)
+            .WithMany()
+            .HasForeignKey(c => c.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<ComplaintReply>()
+            .HasOne(r => r.Complaint)
+            .WithMany(c => c.Replies)
+            .HasForeignKey(r => r.ComplaintId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
