@@ -15,14 +15,17 @@ namespace ShaloTrack_API.Services.Implementations;
 /// <summary>
 /// Serves GPS tracking history and trip summaries.
 ///
-/// READ STRATEGY — S3 read-through fallback (Phase 3c):
-///   1. Query Supabase (live/recent rows, DryRun=true state).
-///   2. If Supabase returns zero points AND S3 is configured, list the
-///      matching archive files from S3 and merge their GeoJSON points.
+/// READ STRATEGY — S3 merge (Phase 3d):
+///   1. Query Supabase for live/recent rows.
+///   2. ALWAYS also query S3 archive for the same window and merge,
+///      deduplicating by EventTime so rows present in both (DryRun=true)
+///      are never double-counted. This fills the gaps left by real purges
+///      (DryRun=false) without requiring Supabase to be fully empty first.
 ///   3. Run the identical trip-detection algorithm over the merged set.
 ///
 /// This makes GetTripsSummaryAsync correct regardless of whether
-/// GpsArchive:PurgeDryRun is true or false.
+/// GpsArchive:PurgeDryRun is true or false, and regardless of whether
+/// only part of the requested window was purged.
 /// </summary>
 public class GpsTrackingService : IGpsTrackingService
 {
@@ -179,20 +182,24 @@ public class GpsTrackingService : IGpsTrackingService
         }
 
         // ── Step 1: Query Supabase ───────────────────────────────────────────
-        var points = await _repository.GetPointsForTripsAsync(vehicleId, from, to);
+        var supabasePoints = await _repository.GetPointsForTripsAsync(vehicleId, from, to);
 
-        // ── Step 2: S3 read-through fallback ────────────────────────────────
-        // Triggered only when Supabase returned zero points. This happens when
-        // GpsArchive:PurgeDryRun=false has deleted rows after archiving to S3.
-        if (points.Count == 0 && !string.IsNullOrEmpty(_bucketName))
+        // ── Step 2: Always merge S3 archive data (Phase 3d) ─────────────────
+        // PurgeDryRun=false deletes specific trip windows from Supabase after
+        // archiving them to S3. Those deleted windows leave gaps in Supabase —
+        // older data outside the purged window still exists. A "fall back only
+        // when Supabase is empty" approach misses these gaps entirely.
+        //
+        // The correct approach: ALWAYS fetch S3 archive data for the window and
+        // merge it with whatever Supabase returned. Deduplication by EventTime
+        // ensures no point is double-counted if PurgeDryRun=true (i.e. rows
+        // exist in both Supabase and S3 simultaneously during dry-run mode).
+        var points = new List<TrackingPointRaw>(supabasePoints);
+
+        if (!string.IsNullOrEmpty(_bucketName))
         {
-            _logger.LogInformation(
-                "GpsTrackingService: Supabase returned 0 points for vehicle {VehicleId} in [{From}, {To}]. " +
-                "Attempting S3 archive fallback.",
-                vehicleId, from, to);
-
-            // Resolve the active DeviceId for this vehicle — needed to build
-            // the S3 prefix. S3 archives are keyed by DeviceId, not VehicleId.
+            // Resolve the active DeviceId for this vehicle — S3 archives are
+            // keyed by DeviceId, not VehicleId.
             var assignment = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
             var activeAssignment = assignment?.DeviceAssignments?
                 .FirstOrDefault(a => a.Status == AssignmentStatus.Active);
@@ -205,21 +212,34 @@ public class GpsTrackingService : IGpsTrackingService
                 if (s3Points.Count > 0)
                 {
                     _logger.LogInformation(
-                        "GpsTrackingService: S3 fallback loaded {Count} point(s) for device {DeviceId}.",
-                        s3Points.Count, resolvedDeviceId.Value);
-                    points = s3Points;
-                }
-                else
-                {
+                        "GpsTrackingService: S3 returned {S3Count} point(s) for device {DeviceId}. " +
+                        "Supabase returned {DbCount} point(s). Merging.",
+                        s3Points.Count, resolvedDeviceId.Value, supabasePoints.Count);
+
+                    // Merge: add S3 points whose EventTime doesn't already exist
+                    // in Supabase. Uses a HashSet for O(1) lookup — safe on t3.micro
+                    // for up to ~130,000 points (the 90-day cap).
+                    var existingTimes = new HashSet<DateTime>(
+                        supabasePoints.Select(p => p.EventTime));
+
+                    foreach (var s3Point in s3Points)
+                    {
+                        if (!existingTimes.Contains(s3Point.EventTime))
+                            points.Add(s3Point);
+                    }
+
+                    // Re-sort after merge — S3 points may interleave with Supabase
+                    points.Sort((a, b) => a.EventTime.CompareTo(b.EventTime));
+
                     _logger.LogInformation(
-                        "GpsTrackingService: S3 fallback also returned 0 points for device {DeviceId} in [{From}, {To}].",
-                        resolvedDeviceId.Value, from, to);
+                        "GpsTrackingService: Merged total {Total} point(s) for vehicle {VehicleId}.",
+                        points.Count, vehicleId);
                 }
             }
             else
             {
                 _logger.LogWarning(
-                    "GpsTrackingService: Could not resolve active DeviceId for vehicle {VehicleId} — S3 fallback skipped.",
+                    "GpsTrackingService: Could not resolve active DeviceId for vehicle {VehicleId} — S3 merge skipped.",
                     vehicleId);
             }
         }
