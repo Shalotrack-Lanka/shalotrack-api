@@ -4,9 +4,9 @@ using ShaloTrack_API.Services.Interfaces;
 namespace ShaloTrack_API.Services.Implementations;
 
 /// <summary>
-/// Singleton by design -- must survive across requests to actually save
-/// anything. See IArchivedTripCache for why this is safe to use as a
-/// negative cache without reopening the Phase 3d partial-purge gap.
+/// Singleton by design -- must survive across requests to actually cache
+/// anything. See IArchivedTripCache for why this is keyed per calendar
+/// month (not per device) and how correctness is protected.
 /// </summary>
 public class ArchivedTripCache : IArchivedTripCache
 {
@@ -14,14 +14,24 @@ public class ArchivedTripCache : IArchivedTripCache
     // call is what actually keeps this correct on the happy path.
     private static readonly TimeSpan SkipTtl = TimeSpan.FromMinutes(10);
 
-    private readonly ConcurrentDictionary<Guid, DateTime> _skipUntil = new();
+    private readonly ConcurrentDictionary<(Guid DeviceId, int Year, int Month), DateTime> _skipUntil = new();
 
-    public bool ShouldSkipS3(Guid deviceId) =>
-        _skipUntil.TryGetValue(deviceId, out var until) && DateTime.UtcNow < until;
+    public bool ShouldSkipMonth(Guid deviceId, int year, int month) =>
+        _skipUntil.TryGetValue((deviceId, year, month), out var until) && DateTime.UtcNow < until;
 
-    public void MarkEmpty(Guid deviceId) =>
-        _skipUntil[deviceId] = DateTime.UtcNow.Add(SkipTtl);
+    public void MarkMonthEmpty(Guid deviceId, int year, int month) =>
+        _skipUntil[(deviceId, year, month)] = DateTime.UtcNow.Add(SkipTtl);
 
-    public void Invalidate(Guid deviceId) =>
-        _skipUntil.TryRemove(deviceId, out _);
+    public void Invalidate(Guid deviceId)
+    {
+        // Clears every cached month for this device -- see interface doc
+        // for why whole-device invalidation, not just the touched month.
+        foreach (var key in _skipUntil.Keys)
+        {
+            if (key.DeviceId == deviceId)
+            {
+                _skipUntil.TryRemove(key, out _);
+            }
+        }
+    }
 }
