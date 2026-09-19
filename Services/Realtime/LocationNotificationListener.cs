@@ -245,15 +245,23 @@ public class LocationNotificationListener : BackgroundService
 
         var alertsToCreate = new List<Alert>();
         var tripJustClosed = false; // NEW
+        DateTime? tripCloseEventTime = null; // NEW -- same instant as the closing IgnitionOff alert's TriggeredAt
 
         lock (state)
         {
             if (state.IgnitionStatus.HasValue && state.IgnitionStatus.Value != data.IgnitionStatus)
             {
+                // Captured ONCE for this transition -- shared by the alert's
+                // TriggeredAt and (if this is an ignition-off) the TripCloseEvent's
+                // tripEndTime. Root-cause fix for the intermittent 24h-fallback bug:
+                // see BuildAlert's triggeredAt doc comment.
+                var ignitionEventTime = TruncateToPostgresPrecision(DateTime.UtcNow);
+
                 alertsToCreate.Add(BuildAlert(
                     data.VehicleId!.Value, data.DeviceId, data.Latitude, data.Longitude,
                     data.IgnitionStatus ? AlertType.IgnitionOn : AlertType.IgnitionOff,
-                    data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off"));
+                    data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off",
+                    ignitionEventTime));
 
                 // NEW -- Phase 3b: trip close detected via the location_updates
                 // path. See class summary for why this mirrors the same check
@@ -261,6 +269,7 @@ public class LocationNotificationListener : BackgroundService
                 if (!data.IgnitionStatus)
                 {
                     tripJustClosed = true;
+                    tripCloseEventTime = ignitionEventTime;
                 }
             }
             state.IgnitionStatus = data.IgnitionStatus;
@@ -276,21 +285,19 @@ public class LocationNotificationListener : BackgroundService
             state.IsSpeeding = isSpeeding;
         }
 
-        if (tripJustClosed)
-        {
-            // TEMP DIAGNOSTIC -- see TripArchivalService.ResolveTripStartAsync
-            // for context on the intermittent 24h-fallback bug this supports
-            // investigating. Remove once root-caused.
-            var enqueueTime = DateTime.UtcNow;
-            _logger.LogWarning(
-                "LocationNotificationListener: [DIAG] step=enqueue path=location_updates device={DeviceId} tripEndTime={TripEndTime:O}",
-                deviceId, enqueueTime);
-            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, enqueueTime));
-        }
-
+        // Persist BEFORE enqueueing. TripArchivalQueueWorker picks this event
+        // up on a separate DbContext/connection almost immediately -- if the
+        // closing IgnitionOff alert isn't committed yet, that's a second,
+        // independent bug surface even with the shared-timestamp fix above.
+        // Commit first, then signal.
         if (alertsToCreate.Count > 0)
         {
             await PersistAlertsAsync(alertsToCreate, data.VehicleId!.Value);
+        }
+
+        if (tripJustClosed)
+        {
+            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, tripCloseEventTime!.Value));
         }
     }
 
@@ -482,15 +489,23 @@ public class LocationNotificationListener : BackgroundService
 
         var alertsToCreate = new List<Alert>();
         var tripJustClosed = false; // NEW
+        DateTime? tripCloseEventTime = null; // NEW -- same instant as the closing IgnitionOff alert's TriggeredAt
 
         lock (state)
         {
             if (state.IgnitionStatus.HasValue && state.IgnitionStatus.Value != data.IgnitionStatus)
             {
+                // Captured ONCE for this transition -- shared by the alert's
+                // TriggeredAt and (if this is an ignition-off) the TripCloseEvent's
+                // tripEndTime. Root-cause fix for the intermittent 24h-fallback bug:
+                // see BuildAlert's triggeredAt doc comment.
+                var ignitionEventTime = TruncateToPostgresPrecision(DateTime.UtcNow);
+
                 alertsToCreate.Add(BuildAlert(
                     data.VehicleId!.Value, data.DeviceId, null, null,
                     data.IgnitionStatus ? AlertType.IgnitionOn : AlertType.IgnitionOff,
-                    data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off"));
+                    data.IgnitionStatus ? "Ignition turned on" : "Ignition turned off",
+                    ignitionEventTime));
 
                 // NEW -- Phase 3b: trip close detected via the device_status_updates
                 // path. See class summary for why this mirrors the same check in
@@ -498,6 +513,7 @@ public class LocationNotificationListener : BackgroundService
                 if (!data.IgnitionStatus)
                 {
                     tripJustClosed = true;
+                    tripCloseEventTime = ignitionEventTime;
                 }
             }
             state.IgnitionStatus = data.IgnitionStatus;
@@ -524,20 +540,17 @@ public class LocationNotificationListener : BackgroundService
             state.IsLowBattery = isLowBattery;
         }
 
-        if (tripJustClosed)
-        {
-            // TEMP DIAGNOSTIC -- see TripArchivalService.ResolveTripStartAsync
-            // for context. Remove once root-caused.
-            var enqueueTime = DateTime.UtcNow;
-            _logger.LogWarning(
-                "LocationNotificationListener: [DIAG] step=enqueue path=device_status_updates device={DeviceId} tripEndTime={TripEndTime:O}",
-                deviceId, enqueueTime);
-            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, enqueueTime));
-        }
-
+        // Persist BEFORE enqueueing -- see the identical comment in
+        // CheckLocationAlertsAsync. This is the path every observed
+        // false-fallback case in the [DIAG] logs came through.
         if (alertsToCreate.Count > 0)
         {
             await PersistAlertsAsync(alertsToCreate, data.VehicleId!.Value);
+        }
+
+        if (tripJustClosed)
+        {
+            _tripCloseEventQueue.Enqueue(new TripCloseEvent(deviceId, data.VehicleId!.Value, tripCloseEventTime!.Value));
         }
     }
 
@@ -624,8 +637,19 @@ public class LocationNotificationListener : BackgroundService
 
     private static Alert BuildAlert(
         Guid vehicleId, Guid? deviceId, decimal? latitude, decimal? longitude,
-        AlertType type, string message)
+        AlertType type, string message, DateTime? triggeredAt = null)
     {
+        // triggeredAt is optional so all the pre-existing call sites (Overspeed,
+        // PowerCut, LowBattery, IgnitionOn) keep behaving exactly as before --
+        // self-capturing "now". The two IgnitionOff call sites (device_status
+        // and location paths) now pass an explicit timestamp instead, because
+        // that same instant is also used as the TripCloseEvent's tripEndTime.
+        // See the root-cause note on the intermittent 24h-fallback bug where
+        // this mattered: TriggeredAt and tripEndTime used to come from two
+        // separate DateTime.UtcNow() calls a few dozen ticks apart, so the
+        // trip's own closing alert always fell inside its own
+        // [ignitionOn, tripEndTime) "intervening IgnitionOff" window.
+        var eventTime = triggeredAt ?? DateTime.UtcNow;
         return new Alert
         {
             VehicleId = vehicleId,
@@ -634,11 +658,27 @@ public class LocationNotificationListener : BackgroundService
             Message = message,
             Latitude = latitude,
             Longitude = longitude,
-            TriggeredAt = DateTime.UtcNow,
+            TriggeredAt = eventTime,
             IsRead = false,
             CreatedAt = DateTime.UtcNow
         };
     }
+
+    /// <summary>
+    /// Truncates to microsecond precision (10 ticks) -- the precision Postgres's
+    /// default `timestamp` column actually stores, one order of magnitude coarser
+    /// than .NET's 100ns tick resolution. Without this, a value captured via
+    /// DateTime.UtcNow() and used BOTH as an Alert's TriggeredAt (which round-trips
+    /// through Postgres and gets truncated on write) AND as an in-memory
+    /// TripCloseEvent.tripEndTime (which never touches the DB) can end up
+    /// bit-unequal after that round-trip -- by up to ~900ns, small but exactly the
+    /// same failure mode as the original two-UtcNow()-calls bug this fix closes.
+    /// Truncating once, before either value is used, makes them provably identical
+    /// after persistence, so ResolveTripStartAsync's exclusive "< tripEndTime"
+    /// intervening-check can never again match the trip's own closing alert.
+    /// </summary>
+    private static DateTime TruncateToPostgresPrecision(DateTime value) =>
+        new DateTime(value.Ticks - (value.Ticks % 10), value.Kind);
 
     private class DeviceAlertState
     {
