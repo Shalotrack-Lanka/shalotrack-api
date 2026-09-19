@@ -11,6 +11,7 @@ public class TripPurgeService : ITripPurgeService
     private readonly ITripArchivalService _archivalService;
     private readonly IGpsTrackingRepository _gpsTrackingRepository;
     private readonly IRawPacketRepository _rawPacketRepository;
+    private readonly IArchivedTripCache _archivedTripCache; // NEW
     private readonly bool _dryRun;
     private readonly ILogger<TripPurgeService> _logger;
 
@@ -19,6 +20,7 @@ public class TripPurgeService : ITripPurgeService
         ITripArchivalService archivalService,
         IGpsTrackingRepository gpsTrackingRepository,
         IRawPacketRepository rawPacketRepository,
+        IArchivedTripCache archivedTripCache, // NEW
         IConfiguration configuration,
         ILogger<TripPurgeService> logger)
     {
@@ -26,6 +28,7 @@ public class TripPurgeService : ITripPurgeService
         _archivalService = archivalService;
         _gpsTrackingRepository = gpsTrackingRepository;
         _rawPacketRepository = rawPacketRepository;
+        _archivedTripCache = archivedTripCache; // NEW
         _logger = logger;
 
         // Defaults TRUE -- fails safe. A missing or misspelled config key
@@ -121,6 +124,12 @@ public class TripPurgeService : ITripPurgeService
                     var deletedRaw = await _rawPacketRepository.DeleteByDeviceInRangeAsync(deviceId, tripStart, tripEndTime);
 
                     await transaction.CommitAsync(cancellationToken);
+
+                    // NEW -- a real purge just happened for this device, so
+                    // GpsTrackingService MUST check S3 again on its very next
+                    // trip-history read for it, not rely on a TTL. This is
+                    // what keeps the latency-cache change safe.
+                    _archivedTripCache.Invalidate(deviceId);
 
                     _logger.LogInformation(
                         "TripPurgeService: purged {GpsCount} GpsTrackings row(s) and {RawCount} RawPackets row(s) " +

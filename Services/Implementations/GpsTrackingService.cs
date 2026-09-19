@@ -34,6 +34,7 @@ public class GpsTrackingService : IGpsTrackingService
     private readonly ICurrentUser _currentUser;
     private readonly IAmazonS3 _s3Client;
     private readonly string? _bucketName;
+    private readonly IArchivedTripCache _archivedTripCache; // NEW -- skips the S3 merge for devices known to have nothing archived
     private readonly ILogger<GpsTrackingService> _logger;
 
     // PERFORMANCE: Hard cap on date range for trip queries.
@@ -51,12 +52,14 @@ public class GpsTrackingService : IGpsTrackingService
         ICurrentUser currentUser,
         IAmazonS3 s3Client,
         IConfiguration configuration,
+        IArchivedTripCache archivedTripCache, // NEW
         ILogger<GpsTrackingService> logger)
     {
         _repository = repository;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _s3Client = s3Client;
+        _archivedTripCache = archivedTripCache; // NEW
         _logger = logger;
 
         // Null-safe — if not configured, S3 fallback is silently skipped.
@@ -207,33 +210,57 @@ public class GpsTrackingService : IGpsTrackingService
             if (activeAssignment is not null)
             {
                 resolvedDeviceId = activeAssignment.DeviceId;
-                var s3Points = await ReadPointsFromS3Async(resolvedDeviceId.Value, from, to);
 
-                if (s3Points.Count > 0)
+                // NEW -- latency guard, see IArchivedTripCache. Skip the S3
+                // round-trip entirely for a device we already know has
+                // nothing archived. Correctness-safe: this cache is only
+                // ever populated after a genuinely empty S3 search, and
+                // TripPurgeService invalidates it the instant a real purge
+                // happens for this device, so a device that gets purged
+                // starts getting merged again on its very next read.
+                if (_archivedTripCache.ShouldSkipS3(resolvedDeviceId.Value))
                 {
                     _logger.LogInformation(
-                        "GpsTrackingService: S3 returned {S3Count} point(s) for device {DeviceId}. " +
-                        "Supabase returned {DbCount} point(s). Merging.",
-                        s3Points.Count, resolvedDeviceId.Value, supabasePoints.Count);
+                        "GpsTrackingService: skipping S3 merge for device {DeviceId} -- " +
+                        "known to have nothing archived (cache).",
+                        resolvedDeviceId.Value);
+                }
+                else
+                {
+                    var s3Points = await ReadPointsFromS3Async(resolvedDeviceId.Value, from, to);
 
-                    // Merge: add S3 points whose EventTime doesn't already exist
-                    // in Supabase. Uses a HashSet for O(1) lookup — safe on t3.micro
-                    // for up to ~130,000 points (the 90-day cap).
-                    var existingTimes = new HashSet<DateTime>(
-                        supabasePoints.Select(p => p.EventTime));
-
-                    foreach (var s3Point in s3Points)
+                    if (s3Points.Count > 0)
                     {
-                        if (!existingTimes.Contains(s3Point.EventTime))
-                            points.Add(s3Point);
+                        _logger.LogInformation(
+                            "GpsTrackingService: S3 returned {S3Count} point(s) for device {DeviceId}. " +
+                            "Supabase returned {DbCount} point(s). Merging.",
+                            s3Points.Count, resolvedDeviceId.Value, supabasePoints.Count);
+
+                        // Merge: add S3 points whose EventTime doesn't already exist
+                        // in Supabase. Uses a HashSet for O(1) lookup — safe on t3.micro
+                        // for up to ~130,000 points (the 90-day cap).
+                        var existingTimes = new HashSet<DateTime>(
+                            supabasePoints.Select(p => p.EventTime));
+
+                        foreach (var s3Point in s3Points)
+                        {
+                            if (!existingTimes.Contains(s3Point.EventTime))
+                                points.Add(s3Point);
+                        }
+
+                        // Re-sort after merge — S3 points may interleave with Supabase
+                        points.Sort((a, b) => a.EventTime.CompareTo(b.EventTime));
+
+                        _logger.LogInformation(
+                            "GpsTrackingService: Merged total {Total} point(s) for vehicle {VehicleId}.",
+                            points.Count, vehicleId);
                     }
-
-                    // Re-sort after merge — S3 points may interleave with Supabase
-                    points.Sort((a, b) => a.EventTime.CompareTo(b.EventTime));
-
-                    _logger.LogInformation(
-                        "GpsTrackingService: Merged total {Total} point(s) for vehicle {VehicleId}.",
-                        points.Count, vehicleId);
+                    else
+                    {
+                        // Genuinely empty for this device's full requested prefix
+                        // set -- safe to remember and skip next time.
+                        _archivedTripCache.MarkEmpty(resolvedDeviceId.Value);
+                    }
                 }
             }
             else

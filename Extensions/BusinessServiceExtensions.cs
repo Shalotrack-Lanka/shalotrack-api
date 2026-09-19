@@ -35,6 +35,9 @@ public static class BusinessServiceExtensions
         services.AddScoped<ISOSService, SOSService>();
         services.AddScoped<IVehicleShareService, VehicleShareService>();
         services.AddScoped<IDeviceCommandService, DeviceCommandService>();
+        // Singleton -- must persist across requests to actually cache
+        // anything. See IArchivedTripCache for correctness reasoning.
+        services.AddSingleton<IArchivedTripCache, ArchivedTripCache>(); // NEW
         return services;
     }
 }
