@@ -16,7 +16,6 @@ public class InternalController : ControllerBase
     private readonly ICustomerService _customerService;
     private readonly IVehicleService _vehicleService;
     private readonly IGpsTrackingService _gpsTrackingService;
-    private readonly ITripArchivalService _tripArchivalService;
     private readonly ISetupShalotrackDeviceService _setupShalotrackDeviceService;
     private readonly IDeviceCommandService _deviceCommandService;
 
@@ -24,14 +23,12 @@ public class InternalController : ControllerBase
         ICustomerService customerService,
         IVehicleService vehicleService,
         IGpsTrackingService gpsTrackingService,
-        ITripArchivalService tripArchivalService,
         ISetupShalotrackDeviceService setupShalotrackDeviceService,
         IDeviceCommandService deviceCommandService)
     {
         _customerService = customerService;
         _vehicleService = vehicleService;
         _gpsTrackingService = gpsTrackingService;
-        _tripArchivalService = tripArchivalService;
         _setupShalotrackDeviceService = setupShalotrackDeviceService;
         _deviceCommandService = deviceCommandService;
     }
@@ -132,23 +129,4 @@ public class InternalController : ControllerBase
         return StatusCode(response.StatusCode, response);
     }
 
-    [HttpGet("archive-trip-test")]
-    public async Task<IActionResult> ArchiveTripTest(
-        [FromQuery] Guid deviceId,
-        [FromQuery] Guid vehicleId,
-        [FromQuery] DateTime tripEndTime)
-    {
-        tripEndTime = DateTime.SpecifyKind(tripEndTime, DateTimeKind.Utc);
-
-        var result = await _tripArchivalService.ArchiveTripAsync(deviceId, vehicleId, tripEndTime);
-
-        return Ok(new
-        {
-            statusCode = result.Success ? 200 : 500,
-            result.Success,
-            result.S3Key,
-            result.PointCount,
-            result.ErrorMessage
-        });
-    }
 }

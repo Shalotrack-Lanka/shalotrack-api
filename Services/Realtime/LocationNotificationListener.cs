@@ -541,8 +541,8 @@ public class LocationNotificationListener : BackgroundService
         }
 
         // Persist BEFORE enqueueing -- see the identical comment in
-        // CheckLocationAlertsAsync. This is the path every observed
-        // false-fallback case in the [DIAG] logs came through.
+        // CheckLocationAlertsAsync. This ordering is what fixed the
+        // intermittent 24h-fallback bug (2026-09-19).
         if (alertsToCreate.Count > 0)
         {
             await PersistAlertsAsync(alertsToCreate, data.VehicleId!.Value);
@@ -566,17 +566,6 @@ public class LocationNotificationListener : BackgroundService
             await unitOfWork.Alerts.AddAsync(alert);
         }
         await unitOfWork.SaveChangesAsync();
-
-        // TEMP DIAGNOSTIC -- see TripArchivalService.ResolveTripStartAsync for
-        // context. Confirms exactly when each alert becomes durable, so it can
-        // be compared against when a later ResolveTripStartAsync call queries
-        // for it. Remove once root-caused.
-        foreach (var alert in alerts)
-        {
-            _logger.LogWarning(
-                "LocationNotificationListener: [DIAG] step=persisted alertId={AlertId} deviceId={DeviceId} type={AlertType} triggeredAt={TriggeredAt:O} committedAt={CommittedAt:O}",
-                alert.AlertId, alert.DeviceId, alert.AlertType, alert.TriggeredAt, DateTime.UtcNow);
-        }
 
         _logger.LogInformation("Created {Count} alert(s) for vehicle {VehicleId}", alerts.Count, vehicleId);
 
