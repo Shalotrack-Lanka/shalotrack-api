@@ -39,6 +39,13 @@ public class ComplaintRepository : IComplaintRepository
             .ToListAsync();
     }
 
+    // CHANGED -- was filtered to Status == WithDealer only, which made a
+    // complaint vanish from the dealer's own list the moment they
+    // escalated it: they'd never see what the admin said or whether it
+    // got resolved, even though they were the one who raised it. Now
+    // returns the dealer's full history regardless of status; the
+    // dealer's own view decides which statuses still show action buttons
+    // (only WithDealer does).
     public async Task<List<Complaint>> GetByDealerAsync(int dealerId)
     {
         return await _context.Complaints
@@ -46,7 +53,7 @@ public class ComplaintRepository : IComplaintRepository
             .Include(c => c.Vehicle)
             .Include(c => c.Customer)
             .Include(c => c.Replies.OrderBy(r => r.CreatedAt))
-            .Where(c => c.DealerId == dealerId && c.Status == ComplaintStatus.WithDealer)
+            .Where(c => c.DealerId == dealerId)
             .OrderByDescending(c => c.CreatedAt)
             .ToListAsync();
     }

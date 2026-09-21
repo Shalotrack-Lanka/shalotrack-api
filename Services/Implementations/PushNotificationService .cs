@@ -15,7 +15,7 @@ public class PushNotificationService : IPushNotificationService
         _logger = logger;
     }
 
-    public async Task SendAlertPushAsync(Guid customerId, string title, string body)
+    public async Task SendAlertPushAsync(Guid customerId, string title, string body, IReadOnlyDictionary<string, string>? data = null)
     {
         var tokens = await _unitOfWork.FcmTokens.GetByCustomerAsync(customerId);
 
@@ -37,7 +37,11 @@ public class PushNotificationService : IPushNotificationService
                     {
                         Title = title,
                         Body = body
-                    }
+                    },
+                    // NEW: only set when the caller passes data, so every
+                    // pre-existing call (Alerts, SOS, VehicleShare) sends
+                    // exactly the same message shape as before.
+                    Data = data != null ? new Dictionary<string, string>(data) : null
                 };
 #pragma warning restore CS0618
 

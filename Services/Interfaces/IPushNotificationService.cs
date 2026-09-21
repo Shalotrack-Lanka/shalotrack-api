@@ -9,5 +9,5 @@ public interface IPushNotificationService
     /// are logged and skipped, not thrown -- one bad token shouldn't block
     /// delivery to the customer's other devices.
     /// </summary>
-    Task SendAlertPushAsync(Guid customerId, string title, string body);
+    Task SendAlertPushAsync(Guid customerId, string title, string body, IReadOnlyDictionary<string, string>? data = null);
 }

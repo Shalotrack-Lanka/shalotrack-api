@@ -43,24 +43,29 @@ public class InternalComplaintsController : ControllerBase
         return StatusCode(response.StatusCode, response);
     }
 
+    // dealerId is an optional query param -- Laravel's AdminComplaintController
+    // omits it entirely (admin keeps unrestricted access), while
+    // DealerComplaintController always passes its own dealer's ID so the
+    // service can reject anything that isn't actually that dealer's
+    // complaint.
     [HttpPost("{complaintId:guid}/escalate")]
-    public async Task<IActionResult> Escalate(Guid complaintId)
+    public async Task<IActionResult> Escalate(Guid complaintId, [FromQuery] int? dealerId)
     {
-        var response = await _complaintService.EscalateAsync(complaintId);
+        var response = await _complaintService.EscalateAsync(complaintId, dealerId);
         return StatusCode(response.StatusCode, response);
     }
 
     [HttpPost("{complaintId:guid}/resolve")]
-    public async Task<IActionResult> Resolve(Guid complaintId)
+    public async Task<IActionResult> Resolve(Guid complaintId, [FromQuery] int? dealerId)
     {
-        var response = await _complaintService.ResolveAsync(complaintId);
+        var response = await _complaintService.ResolveAsync(complaintId, dealerId);
         return StatusCode(response.StatusCode, response);
     }
 
     [HttpPost("{complaintId:guid}/close")]
-    public async Task<IActionResult> Close(Guid complaintId)
+    public async Task<IActionResult> Close(Guid complaintId, [FromQuery] int? dealerId)
     {
-        var response = await _complaintService.CloseAsync(complaintId);
+        var response = await _complaintService.CloseAsync(complaintId, dealerId);
         return StatusCode(response.StatusCode, response);
     }
 }

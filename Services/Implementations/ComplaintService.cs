@@ -182,8 +182,11 @@ public class ComplaintService : IComplaintService
     public async Task<ApiResponse<ComplaintResponseDto>> AddInternalReplyAsync(Guid complaintId, InternalPostComplaintReplyDto dto)
     {
         var complaint = await _unitOfWork.Complaints.GetByIdAsync(complaintId);
-        if (complaint is null)
+        if (complaint is null || !DealerOwnsComplaint(complaint, dto.DealerId))
         {
+            // Same not-found response whether it's genuinely missing or a
+            // dealer probing another dealer's complaint id -- doesn't
+            // confirm existence either way.
             return ApiResponse<ComplaintResponseDto>.Fail((int)HttpStatusCode.NotFound, "Complaint not found.", "");
         }
 
@@ -206,16 +209,17 @@ public class ComplaintService : IComplaintService
         await _pushNotificationService.SendAlertPushAsync(
             complaint.CustomerId,
             "New reply on your complaint",
-            $"{authorLabel} replied: {Truncate(dto.Message, 100)}");
+            $"{authorLabel} replied: {Truncate(dto.Message, 100)}",
+            ComplaintPushData(complaint.ComplaintId));
 
         var refreshed = await _unitOfWork.Complaints.GetByIdAsync(complaintId);
         return ApiResponse<ComplaintResponseDto>.Ok(ToDto(refreshed!, refreshed!.Vehicle), "Reply added.");
     }
 
-    public async Task<ApiResponse<ComplaintResponseDto>> EscalateAsync(Guid complaintId)
+    public async Task<ApiResponse<ComplaintResponseDto>> EscalateAsync(Guid complaintId, int? dealerId = null)
     {
         var complaint = await _unitOfWork.Complaints.GetByIdAsync(complaintId);
-        if (complaint is null)
+        if (complaint is null || !DealerOwnsComplaint(complaint, dealerId))
         {
             return ApiResponse<ComplaintResponseDto>.Fail((int)HttpStatusCode.NotFound, "Complaint not found.", "");
         }
@@ -236,17 +240,30 @@ public class ComplaintService : IComplaintService
         await _pushNotificationService.SendAlertPushAsync(
             complaint.CustomerId,
             "Complaint escalated",
-            "Your complaint has been transferred to ShaloTrack support for further help.");
+            "Your complaint has been transferred to ShaloTrack support for further help.",
+            ComplaintPushData(complaint.ComplaintId));
 
         return ApiResponse<ComplaintResponseDto>.Ok(ToDto(complaint, complaint.Vehicle), "Complaint escalated.");
     }
 
-    public async Task<ApiResponse<ComplaintResponseDto>> ResolveAsync(Guid complaintId)
+    public async Task<ApiResponse<ComplaintResponseDto>> ResolveAsync(Guid complaintId, int? dealerId = null)
     {
         var complaint = await _unitOfWork.Complaints.GetByIdAsync(complaintId);
-        if (complaint is null)
+        if (complaint is null || !DealerOwnsComplaint(complaint, dealerId))
         {
             return ApiResponse<ComplaintResponseDto>.Fail((int)HttpStatusCode.NotFound, "Complaint not found.", "");
+        }
+
+        // A dealer can only resolve a complaint that's still theirs to
+        // handle (WithDealer). Admin (dealerId null) keeps the original,
+        // looser behavior -- it can resolve from any state, since it's
+        // the final authority regardless of where a complaint currently
+        // sits.
+        if (dealerId is not null && complaint.Status != ComplaintStatus.WithDealer)
+        {
+            return ApiResponse<ComplaintResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest, "Cannot resolve.",
+                "This complaint is no longer with you to resolve.");
         }
 
         complaint.Status = ComplaintStatus.Resolved;
@@ -258,17 +275,25 @@ public class ComplaintService : IComplaintService
         await _pushNotificationService.SendAlertPushAsync(
             complaint.CustomerId,
             "Complaint resolved",
-            "Your complaint has been marked as resolved.");
+            "Your complaint has been marked as resolved.",
+            ComplaintPushData(complaint.ComplaintId));
 
         return ApiResponse<ComplaintResponseDto>.Ok(ToDto(complaint, complaint.Vehicle), "Complaint resolved.");
     }
 
-    public async Task<ApiResponse<ComplaintResponseDto>> CloseAsync(Guid complaintId)
+    public async Task<ApiResponse<ComplaintResponseDto>> CloseAsync(Guid complaintId, int? dealerId = null)
     {
         var complaint = await _unitOfWork.Complaints.GetByIdAsync(complaintId);
-        if (complaint is null)
+        if (complaint is null || !DealerOwnsComplaint(complaint, dealerId))
         {
             return ApiResponse<ComplaintResponseDto>.Fail((int)HttpStatusCode.NotFound, "Complaint not found.", "");
+        }
+
+        if (dealerId is not null && complaint.Status != ComplaintStatus.WithDealer)
+        {
+            return ApiResponse<ComplaintResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest, "Cannot close.",
+                "This complaint is no longer with you to close.");
         }
 
         complaint.Status = ComplaintStatus.Closed;
@@ -313,6 +338,25 @@ public class ComplaintService : IComplaintService
 
     private static string Truncate(string s, int maxLength) =>
         s.Length <= maxLength ? s : s[..maxLength] + "...";
+
+    // NEW -- the ownership check backing the dealer-scoped write actions
+    // above. dealerId is null for every admin-originated call (index,
+    // reply, resolve, close all skip this check entirely, matching their
+    // pre-existing unrestricted behavior), and set to the calling
+    // dealer's own ID for dealer-originated calls, in which case the
+    // complaint's actual DealerId must match or the action is refused.
+    private static bool DealerOwnsComplaint(Complaint complaint, int? dealerId) =>
+        dealerId is null || complaint.DealerId == dealerId;
+
+    // NEW -- lets the Android FCM handler route the notification tap
+    // straight to this complaint's thread instead of the generic Alerts
+    // screen. Keys are deliberately plain strings (FCM data payloads are
+    // string-only on the wire regardless of type).
+    private static Dictionary<string, string> ComplaintPushData(Guid complaintId) => new()
+    {
+        ["type"] = "complaint",
+        ["complaintId"] = complaintId.ToString()
+    };
 
     private static ComplaintResponseDto ToDto(Complaint c, Vehicle vehicle) => new()
     {
