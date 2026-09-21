@@ -342,12 +342,14 @@ public class GpsTrackingService : IGpsTrackingService
                 continue;
             }
 
+            // Parse the trip window from each filename first -- pure string/
+            // date parsing, no I/O -- so only files that actually overlap
+            // [from, to] go on to a real download.
+            // Filename format: {startZ}_{endZ}.json
+            // e.g. 20260915T112119Z_20260915T112126Z.json
+            var overlapping = new List<S3Object>();
             foreach (var obj in objects)
             {
-                // Parse the trip window from the filename so we can skip files
-                // that don't overlap the requested range without downloading them.
-                // Filename format: {startZ}_{endZ}.json
-                // e.g. 20260915T112119Z_20260915T112126Z.json
                 var fileName = obj.Key.Split('/').Last();
                 if (!TryParseTripWindow(fileName, out var fileStart, out var fileEnd))
                 {
@@ -357,35 +359,81 @@ public class GpsTrackingService : IGpsTrackingService
                     continue;
                 }
 
-                // Skip files whose trip window doesn't overlap [from, to]
                 if (fileEnd < from || fileStart > to) continue;
+                overlapping.Add(obj);
+            }
 
-                try
-                {
-                    var getRequest = new GetObjectRequest
-                    {
-                        BucketName = _bucketName,
-                        Key = obj.Key
-                    };
-
-                    using var getResponse = await _s3Client.GetObjectAsync(getRequest);
-                    using var reader = new StreamReader(getResponse.ResponseStream);
-                    var json = await reader.ReadToEndAsync();
-
-                    var points = DeserialiseGeoJsonPoints(json, from, to);
-                    allPoints.AddRange(points);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "GpsTrackingService: Failed to download or parse S3 object {Key}.", obj.Key);
-                }
+            if (overlapping.Count > 0)
+            {
+                var monthPoints = await DownloadAndParseObjectsAsync(overlapping, from, to);
+                allPoints.AddRange(monthPoints);
             }
         }
 
         // Chronological order — identical to what GetPointsForTripsAsync returns
         allPoints.Sort((a, b) => a.EventTime.CompareTo(b.EventTime));
         return allPoints;
+    }
+
+    // PERFORMANCE: TripArchivalService archives one S3 object per TRIP, not
+    // per day or month -- a vehicle doing a normal day's worth of driving
+    // can easily leave 10-30 archive objects behind in a single month, so a
+    // 30-day request can mean hundreds of small files. Downloading them one
+    // at a time (the original implementation: a plain `await` inside the
+    // foreach) means paying that many sequential S3 round-trips end to end,
+    // which is exactly why history requests visibly slowed down once real
+    // data started coming from S3 instead of Supabase. Bounded parallel
+    // downloads cut wall-clock time roughly by the concurrency factor below,
+    // without changing what's downloaded, how it's deduplicated, or how
+    // it's sorted -- ReadPointsFromS3Async's caller-facing behavior is
+    // unchanged; only how fast the S3 half of it runs.
+    //
+    // Concurrency is capped (not Task.WhenAll on everything at once) to
+    // avoid opening hundreds of simultaneous connections against S3 from a
+    // t3.micro instance, which has limited outbound connection/thread
+    // headroom -- referenced elsewhere in this class re: the 90-day/130k-
+    // point cap for the same reason.
+    private const int S3DownloadConcurrency = 8;
+
+    private async Task<List<TrackingPointRaw>> DownloadAndParseObjectsAsync(
+        List<S3Object> objects, DateTime from, DateTime to)
+    {
+        var results = new System.Collections.Concurrent.ConcurrentBag<TrackingPointRaw>();
+        using var gate = new SemaphoreSlim(S3DownloadConcurrency);
+
+        var tasks = objects.Select(async obj =>
+        {
+            await gate.WaitAsync();
+            try
+            {
+                var getRequest = new GetObjectRequest
+                {
+                    BucketName = _bucketName,
+                    Key = obj.Key
+                };
+
+                using var getResponse = await _s3Client.GetObjectAsync(getRequest);
+                using var reader = new StreamReader(getResponse.ResponseStream);
+                var json = await reader.ReadToEndAsync();
+
+                foreach (var point in DeserialiseGeoJsonPoints(json, from, to))
+                {
+                    results.Add(point);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "GpsTrackingService: Failed to download or parse S3 object {Key}.", obj.Key);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+        return results.ToList();
     }
 
     /// <summary>
