@@ -109,6 +109,80 @@ public class GpsTrackingService : IGpsTrackingService
 
         if (filter.PageSize > 500) filter.PageSize = 500;
 
+        // BUG FIX (2026-09-21): this endpoint backs the Android playback screen
+        // (TripDetailActivity / TripHistoryAdapter) and the live map trail
+        // (VehicleTrailRenderer) — every mobile caller always sends From/To.
+        // It used to read ONLY Supabase (_repository.GetAsync), with no S3
+        // fallback at all, unlike GetTripsSummaryAsync below. Once
+        // TripPurgeService actually deletes a window from Supabase after
+        // archiving it (GpsArchive:PurgeDryRun=false), the raw points for that
+        // window vanished from this endpoint entirely — playback would show
+        // "No tracking points found for this trip", or a route that stops dead
+        // partway through if only part of the window had been purged yet.
+        // This is exactly the intermittent "sometimes playback won't work"
+        // symptom: it depended on whether the purge had already run for that
+        // trip's window, which is invisible from the client.
+        //
+        // Fix: when a date range is given, merge Supabase + S3 the same way
+        // GetTripsSummaryAsync already does (see GetMergedPointsAsync), then
+        // re-apply this endpoint's existing paging contract on top so callers
+        // see no shape change.
+        if (filter.From.HasValue && filter.To.HasValue)
+        {
+            if (filter.To.Value <= filter.From.Value)
+            {
+                return ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>.Fail(
+                    (int)HttpStatusCode.BadRequest,
+                    "Invalid date range.",
+                    "'to' must be after 'from'.");
+            }
+
+            if ((filter.To.Value - filter.From.Value).TotalDays > MaxTripReportDays)
+            {
+                return ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>.Fail(
+                    (int)HttpStatusCode.BadRequest,
+                    "Date range too large.",
+                    $"Tracking history is limited to {MaxTripReportDays} days per request. " +
+                    $"Split longer ranges into multiple calls.");
+            }
+
+            var merged = await GetMergedPointsAsync(filter.VehicleId.Value, filter.From.Value, filter.To.Value);
+
+            var mapped = merged.Points
+                .Select(p => new GpsTrackingResponseDto
+                {
+                    // Synthetic -- a merged point may have come from an archived
+                    // S3 file rather than a single Supabase row, so there's no
+                    // single TrackingId to attach. No client reads this field
+                    // from this endpoint's response (confirmed: TrackingPoint.java
+                    // on the Android side doesn't even deserialize it).
+                    TrackingId = 0,
+                    DeviceId = merged.DeviceId ?? Guid.Empty,
+                    ImeiNumber = merged.ImeiNumber,
+                    VehicleId = filter.VehicleId.Value,
+                    VehicleNumber = merged.VehicleNumber,
+                    Latitude = p.Latitude,
+                    Longitude = p.Longitude,
+                    Altitude = null,   // not retained by TrackingPointRaw/the S3 archive at this layer
+                    Speed = p.Speed,
+                    Heading = 0,       // Android derives on-screen bearing itself from consecutive points
+                    Satellites = 0,
+                    GpsAccuracy = null,
+                    EventTime = p.EventTime
+                })
+                .OrderByDescending(x => x.EventTime)
+                .Skip((filter.Page - 1) * filter.PageSize)
+                .Take(filter.PageSize)
+                .ToList();
+
+            return ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>.Ok(
+                mapped,
+                "GPS tracking records retrieved successfully."
+            );
+        }
+
+        // No date range supplied -- nothing for S3 to search against, so this
+        // keeps the exact original Supabase-only behavior.
         var tracking = await _repository.GetAsync(filter);
 
         return ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>.Ok(
@@ -154,8 +228,6 @@ public class GpsTrackingService : IGpsTrackingService
         }
 
         // ── Ownership check ──────────────────────────────────────────────────
-        Guid? resolvedDeviceId = null;
-
         if (!_currentUser.IsStaff)
         {
             var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId);
@@ -184,10 +256,47 @@ public class GpsTrackingService : IGpsTrackingService
             }
         }
 
-        // ── Step 1: Query Supabase ───────────────────────────────────────────
+        // ── Steps 1+2: Supabase + S3 merge, shared with GetAsync's raw-points
+        // endpoint below (see GetMergedPointsAsync's own doc for why this used
+        // to be duplicated and why that was a bug in itself: GetAsync had no S3
+        // merge at all until 2026-09-21).
+        var merged = await GetMergedPointsAsync(vehicleId, from, to);
+
+        // ── Step 3: Trip detection (identical algorithm regardless of source) ─
+        return ApiResponse<TripsReportResponseDto>.Ok(
+            ComputeTripsReport(vehicleId, from, to, merged.Points),
+            "Trips summary retrieved successfully.");
+    }
+
+    /// <summary>
+    /// Merged result of GetMergedPointsAsync: the chronological Supabase+S3
+    /// point set for a vehicle's window, plus the vehicle/device identity
+    /// needed by callers (like GetAsync) that have to re-attach it to each
+    /// point in a client-facing DTO. GetTripsSummaryAsync only needs Points;
+    /// GetAsync needs all four.
+    /// </summary>
+    private sealed record MergedTrackingResult(
+        List<TrackingPointRaw> Points,
+        Guid? DeviceId,
+        string VehicleNumber,
+        string ImeiNumber);
+
+    /// <summary>
+    /// Single source of truth for "Supabase rows for this window, plus
+    /// whatever's archived to S3 for the same window, deduplicated by
+    /// EventTime." Used by both GetTripsSummaryAsync (trip/stop detection)
+    /// and GetAsync (raw playback/trail points) so the two endpoints can
+    /// never again drift into "one merges S3, the other doesn't" — which is
+    /// exactly the bug that made mobile trip playback intermittently come up
+    /// empty once TripPurgeService started actually deleting purged windows
+    /// from Supabase.
+    /// </summary>
+    private async Task<MergedTrackingResult> GetMergedPointsAsync(Guid vehicleId, DateTime from, DateTime to)
+    {
+        // ── Query Supabase ───────────────────────────────────────────────────
         var supabasePoints = await _repository.GetPointsForTripsAsync(vehicleId, from, to);
 
-        // ── Step 2: Always merge S3 archive data (Phase 3d) ─────────────────
+        // ── Always merge S3 archive data (Phase 3d) ─────────────────────────
         // PurgeDryRun=false deletes specific trip windows from Supabase after
         // archiving them to S3. Those deleted windows leave gaps in Supabase —
         // older data outside the purged window still exists. A "fall back only
@@ -199,17 +308,25 @@ public class GpsTrackingService : IGpsTrackingService
         // exist in both Supabase and S3 simultaneously during dry-run mode).
         var points = new List<TrackingPointRaw>(supabasePoints);
 
+        Guid? resolvedDeviceId = null;
+        string vehicleNumber = string.Empty;
+        string imeiNumber = string.Empty;
+
         if (!string.IsNullOrEmpty(_bucketName))
         {
             // Resolve the active DeviceId for this vehicle — S3 archives are
-            // keyed by DeviceId, not VehicleId.
-            var assignment = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
-            var activeAssignment = assignment?.DeviceAssignments?
+            // keyed by DeviceId, not VehicleId. Also gives us VehicleNumber/
+            // ImeiNumber in the same round trip for GetAsync's DTO mapping.
+            var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+            var activeAssignment = vehicle?.DeviceAssignments?
                 .FirstOrDefault(a => a.Status == AssignmentStatus.Active);
+
+            if (vehicle is not null) vehicleNumber = vehicle.VehicleNumber;
 
             if (activeAssignment is not null)
             {
                 resolvedDeviceId = activeAssignment.DeviceId;
+                imeiNumber = activeAssignment.Device?.ImeiNumber ?? string.Empty;
 
                 // NOTE: the per-device/per-request skip guard that used to live
                 // here was wrong -- it suppressed S3 for an ENTIRE device based
@@ -258,10 +375,7 @@ public class GpsTrackingService : IGpsTrackingService
             }
         }
 
-        // ── Step 3: Trip detection (identical algorithm regardless of source) ─
-        return ApiResponse<TripsReportResponseDto>.Ok(
-            ComputeTripsReport(vehicleId, from, to, points),
-            "Trips summary retrieved successfully.");
+        return new MergedTrackingResult(points, resolvedDeviceId, vehicleNumber, imeiNumber);
     }
 
     // ── S3 Archive Reader ────────────────────────────────────────────────────
