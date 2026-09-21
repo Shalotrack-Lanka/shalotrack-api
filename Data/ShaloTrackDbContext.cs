@@ -63,6 +63,19 @@ public class ShaloTrackDbContext : DbContext
             .HasIndex(r => new { r.DeviceId, r.ReceivedAt })
             .HasDatabaseName("IX_RawPackets_DeviceId_ReceivedAt");
 
+        // Supports RawPacketRetentionWorker's fleet-wide "ReceivedAt < cutoff"
+        // sweep (2026-09-22) -- the composite index above is leading on
+        // DeviceId and can't serve a query with no DeviceId predicate
+        // efficiently as the fleet grows. Declared here so `dotnet ef
+        // migrations add` sees this index as part of the actual code model,
+        // not just the snapshot -- omitting this the first time caused the
+        // scaffolded migration to invert (DROP instead of CREATE), since the
+        // tool diffs the code model against the snapshot, not the other way
+        // around.
+        modelBuilder.Entity<RawPacket>()
+            .HasIndex(r => r.ReceivedAt)
+            .HasDatabaseName("IX_RawPackets_ReceivedAt");
+
         modelBuilder.Entity<GpsTracking>()
             .HasOne(g => g.Device)
             .WithMany(d => d.GpsTrackings)

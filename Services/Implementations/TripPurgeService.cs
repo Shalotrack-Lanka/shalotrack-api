@@ -10,7 +10,6 @@ public class TripPurgeService : ITripPurgeService
     private readonly ShaloTrackDbContext _context;
     private readonly ITripArchivalService _archivalService;
     private readonly IGpsTrackingRepository _gpsTrackingRepository;
-    private readonly IRawPacketRepository _rawPacketRepository;
     private readonly IArchivedTripCache _archivedTripCache; // NEW
     private readonly bool _dryRun;
     private readonly ILogger<TripPurgeService> _logger;
@@ -19,7 +18,6 @@ public class TripPurgeService : ITripPurgeService
         ShaloTrackDbContext context,
         ITripArchivalService archivalService,
         IGpsTrackingRepository gpsTrackingRepository,
-        IRawPacketRepository rawPacketRepository,
         IArchivedTripCache archivedTripCache, // NEW
         IConfiguration configuration,
         ILogger<TripPurgeService> logger)
@@ -27,7 +25,6 @@ public class TripPurgeService : ITripPurgeService
         _context = context;
         _archivalService = archivalService;
         _gpsTrackingRepository = gpsTrackingRepository;
-        _rawPacketRepository = rawPacketRepository;
         _archivedTripCache = archivedTripCache; // NEW
         _logger = logger;
 
@@ -93,13 +90,13 @@ public class TripPurgeService : ITripPurgeService
                 if (_dryRun)
                 {
                     var wouldDeleteGps = await _gpsTrackingRepository.CountByDeviceInRangeAsync(deviceId, tripStart, tripEndTime);
-                    var wouldDeleteRaw = await _rawPacketRepository.CountByDeviceInRangeAsync(deviceId, tripStart, tripEndTime);
 
                     _logger.LogWarning(
-                        "TripPurgeService: DRY RUN -- would delete {GpsCount} GpsTrackings row(s) and {RawCount} " +
-                        "RawPackets row(s) for device {DeviceId} in [{From}, {To}] (archived to {S3Key}). Nothing " +
-                        "was actually deleted. Set GpsArchive:PurgeDryRun=false to enable real deletes.",
-                        wouldDeleteGps, wouldDeleteRaw, deviceId, tripStart, tripEndTime, archiveResult.S3Key);
+                        "TripPurgeService: DRY RUN -- would delete {GpsCount} GpsTrackings row(s) for device " +
+                        "{DeviceId} in [{From}, {To}] (archived to {S3Key}). Nothing was actually deleted. Set " +
+                        "GpsArchive:PurgeDryRun=false to enable real deletes. (RawPackets are no longer purged " +
+                        "here -- see RawPacketRetentionWorker.)",
+                        wouldDeleteGps, deviceId, tripStart, tripEndTime, archiveResult.S3Key);
                     return;
                 }
 
@@ -107,7 +104,6 @@ public class TripPurgeService : ITripPurgeService
                 try
                 {
                     var deletedGps = await _gpsTrackingRepository.DeleteByDeviceInRangeAsync(deviceId, tripStart, tripEndTime);
-                    var deletedRaw = await _rawPacketRepository.DeleteByDeviceInRangeAsync(deviceId, tripStart, tripEndTime);
 
                     await transaction.CommitAsync(cancellationToken);
 
@@ -118,9 +114,10 @@ public class TripPurgeService : ITripPurgeService
                     _archivedTripCache.Invalidate(deviceId);
 
                     _logger.LogInformation(
-                        "TripPurgeService: purged {GpsCount} GpsTrackings row(s) and {RawCount} RawPackets row(s) " +
-                        "for device {DeviceId} in [{From}, {To}], archived to {S3Key}.",
-                        deletedGps, deletedRaw, deviceId, tripStart, tripEndTime, archiveResult.S3Key);
+                        "TripPurgeService: purged {GpsCount} GpsTrackings row(s) for device {DeviceId} in " +
+                        "[{From}, {To}], archived to {S3Key}. (RawPackets are purged independently on a flat " +
+                        "retention window -- see RawPacketRetentionWorker.)",
+                        deletedGps, deviceId, tripStart, tripEndTime, archiveResult.S3Key);
                 }
                 catch
                 {

@@ -13,23 +13,34 @@ public class RawPacketRepository : IRawPacketRepository
         _context = context;
     }
 
-    public async Task<int> CountByDeviceInRangeAsync(Guid deviceId, DateTime from, DateTime to)
+    public async Task<int> CountOlderThanAsync(DateTime cutoffUtc)
     {
         return await _context.RawPackets
-            .Where(x => x.DeviceId == deviceId && x.ReceivedAt >= from && x.ReceivedAt <= to)
+            .Where(x => x.ReceivedAt < cutoffUtc)
             .CountAsync();
     }
 
-    // Safe against DeviceEvents referencing a deleted RawPacket: that
-    // relationship is optional (nullable RawPacketId) with EF Core's default
-    // ON DELETE SET NULL for optional FKs -- confirmed against the actual
-    // migration snapshot before writing this, not assumed. Deleting a
-    // RawPacket with DeviceEvents pointing to it nulls out that backlink,
-    // it does not throw and does not cascade-delete the DeviceEvent itself.
-    public async Task<int> DeleteByDeviceInRangeAsync(Guid deviceId, DateTime from, DateTime to)
+    // Raw SQL, not ExecuteDeleteAsync(): EF Core's ExecuteDelete translation
+    // doesn't support LIMIT/Take, and an unbounded DELETE over the full
+    // backlog (first run after this worker ships, or after a long dry-run
+    // period) would hold a single long transaction/lock and a large WAL
+    // burst against a t3.micro Postgres instance. The subquery + LIMIT +
+    // ORDER BY PacketId keeps each batch small, bounded, and deterministic
+    // (oldest rows first).
+    //
+    // Safe against DeviceEvents referencing a deleted RawPacket: that FK is
+    // optional (nullable RawPacketId) with ON DELETE SET NULL -- confirmed
+    // against the migration snapshot, not assumed (same check done for the
+    // old per-device delete this replaces).
+    public async Task<int> DeleteOldestBatchAsync(DateTime cutoffUtc, int batchSize)
     {
-        return await _context.RawPackets
-            .Where(x => x.DeviceId == deviceId && x.ReceivedAt >= from && x.ReceivedAt <= to)
-            .ExecuteDeleteAsync();
+        return await _context.Database.ExecuteSqlInterpolatedAsync($@"
+            DELETE FROM ""RawPackets""
+            WHERE ""PacketId"" IN (
+                SELECT ""PacketId"" FROM ""RawPackets""
+                WHERE ""ReceivedAt"" < {cutoffUtc}
+                ORDER BY ""PacketId""
+                LIMIT {batchSize}
+            )");
     }
 }

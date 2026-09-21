@@ -37,6 +37,13 @@ builder.Services.AddSingleton<ITripCloseEventQueue, TripCloseEventQueue>();
 builder.Services.AddScoped<ITripPurgeService, TripPurgeService>();
 builder.Services.AddHostedService<TripArchivalQueueWorker>();
 
+// ---- RAWPACKETS RETENTION -- decoupled from trip purge (2026-09-22) ----
+// RawPackets (raw protocol payloads) are not trip-scoped and use a
+// different clock (ReceivedAt) than GpsTracking (EventTime). See
+// RawPacketRetentionWorker for the full incident writeup. Gated by
+// RawPacketRetention:DryRun -- defaults to true (fails safe).
+builder.Services.AddHostedService<RawPacketRetentionWorker>();
+
 // ASP.NET Core
 builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();
