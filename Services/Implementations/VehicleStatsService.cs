@@ -15,9 +15,6 @@ public class VehicleStatsService : IVehicleStatsService
     private readonly ICurrentUser _currentUser;
     private readonly IGpsTrackingService _gpsTrackingService;
 
-    // Sri Lanka Standard Time -- fixed UTC+5:30, no DST, matching the same
-    // conversion already used elsewhere in this project (the gateway's own
-    // logger does the same thing for display purposes).
     private static readonly TimeSpan SriLankaOffset = TimeSpan.FromHours(5.5);
 
     public VehicleStatsService(
@@ -30,31 +27,71 @@ public class VehicleStatsService : IVehicleStatsService
         _gpsTrackingService = gpsTrackingService;
     }
 
+    private const int MaxReportRangeDays = 90;
+
     public async Task<ApiResponse<VehicleStatsResponseDto>> GetStatsAsync(Guid vehicleId, string? period)
+    {
+        var ownershipResult = await ResolveOwnedVehicleAsync(vehicleId);
+        if (ownershipResult.Error is not null) return ownershipResult.Error;
+        var vehicle = ownershipResult.Vehicle!;
+
+        var normalizedPeriod = (period ?? "today").ToLowerInvariant();
+        var (from, to) = ResolvePeriodRange(normalizedPeriod, vehicle.CreatedAt);
+
+        return await ComputeStatsAsync(vehicleId, normalizedPeriod, from, to);
+    }
+
+    public async Task<ApiResponse<VehicleStatsResponseDto>> GetStatsForRangeAsync(
+        Guid vehicleId, DateTime from, DateTime to)
+    {
+        if (to <= from)
+        {
+            return ApiResponse<VehicleStatsResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest,
+                "Invalid date range.",
+                "'to' must be after 'from'.");
+        }
+
+        if ((to - from).TotalDays > MaxReportRangeDays)
+        {
+            return ApiResponse<VehicleStatsResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest,
+                "Date range too large.",
+                $"Reports are limited to {MaxReportRangeDays} days per request. " +
+                $"Split longer ranges into multiple calls.");
+        }
+
+        var ownershipResult = await ResolveOwnedVehicleAsync(vehicleId);
+        if (ownershipResult.Error is not null) return ownershipResult.Error;
+
+        return await ComputeStatsAsync(vehicleId, "custom", from, to);
+    }
+
+    private sealed record OwnershipResult(Models.Vehicle? Vehicle, ApiResponse<VehicleStatsResponseDto>? Error);
+
+    private async Task<OwnershipResult> ResolveOwnedVehicleAsync(Guid vehicleId)
     {
         var uid = _currentUser.FirebaseUid;
         if (string.IsNullOrEmpty(uid))
         {
-            return ApiResponse<VehicleStatsResponseDto>.Fail(
-                (int)HttpStatusCode.Unauthorized, "Authentication required.", "No valid session found.");
+            return new OwnershipResult(null, ApiResponse<VehicleStatsResponseDto>.Fail(
+                (int)HttpStatusCode.Unauthorized, "Authentication required.", "No valid session found."));
         }
 
         var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(uid);
         if (customer is null)
         {
-            return ApiResponse<VehicleStatsResponseDto>.Fail(
-                (int)HttpStatusCode.NotFound, "Profile not found.", "No customer profile exists for this account.");
+            return new OwnershipResult(null, ApiResponse<VehicleStatsResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound, "Profile not found.", "No customer profile exists for this account."));
         }
 
         var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
         if (vehicle is null)
         {
-            return ApiResponse<VehicleStatsResponseDto>.Fail(
-                (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'.");
+            return new OwnershipResult(null, ApiResponse<VehicleStatsResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'."));
         }
 
-        // FIX: was owner-or-staff only -- confirmed as the real cause of
-        // the Value screen not loading for a shared vehicle.
         bool isOwner = vehicle.CustomerId == customer.CustomerId;
         bool hasAcceptedShare = false;
         if (!_currentUser.IsStaff && !isOwner)
@@ -65,13 +102,16 @@ public class VehicleStatsService : IVehicleStatsService
 
         if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare && !vehicle.IsDemoVehicle)
         {
-            return ApiResponse<VehicleStatsResponseDto>.Fail(
-                (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'.");
+            return new OwnershipResult(null, ApiResponse<VehicleStatsResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'."));
         }
 
-        var normalizedPeriod = (period ?? "today").ToLowerInvariant();
-        var (from, to) = ResolvePeriodRange(normalizedPeriod, vehicle.CreatedAt);
+        return new OwnershipResult(vehicle, null);
+    }
 
+    private async Task<ApiResponse<VehicleStatsResponseDto>> ComputeStatsAsync(
+        Guid vehicleId, string normalizedPeriod, DateTime from, DateTime to)
+    {
         var tripsResult = await _gpsTrackingService.GetTripsSummaryAsync(vehicleId, from, to);
         if (tripsResult.Data is null)
         {
@@ -125,10 +165,10 @@ public class VehicleStatsService : IVehicleStatsService
         switch (period)
         {
             case "week":
-                fromLocal = todayLocalStart.AddDays(-6); // last 7 days including today
+                fromLocal = todayLocalStart.AddDays(-6);
                 break;
             case "month":
-                fromLocal = todayLocalStart.AddDays(-29); // last 30 days including today
+                fromLocal = todayLocalStart.AddDays(-29);
                 break;
             case "all":
                 fromLocal = vehicleCreatedAt + SriLankaOffset;
@@ -139,15 +179,11 @@ public class VehicleStatsService : IVehicleStatsService
                 break;
         }
 
-        // Convert local boundaries back to UTC for the actual DB query.
         var from = fromLocal - SriLankaOffset;
         var to = DateTime.UtcNow;
         return (from, to);
     }
 
-    // Groups trips and stops by Sri Lanka LOCAL calendar day, not UTC --
-    // a trip starting late at night local time would otherwise be
-    // misattributed to the wrong day on the chart.
     private static List<DailyStatDto> BuildDailyBreakdown(
         List<TripSummaryDto> trips, List<StopSummaryDto> stops, DateTime from, DateTime to)
     {

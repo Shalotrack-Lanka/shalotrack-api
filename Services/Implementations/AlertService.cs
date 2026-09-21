@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.Alert;
+using ShaloTrack_API.Enums;
 using ShaloTrack_API.Models;
 using ShaloTrack_API.Repositories.Interfaces;
 using ShaloTrack_API.Responses;
@@ -12,6 +13,8 @@ public class AlertService : IAlertService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
+
+    private const int MaxReportRangeDays = 90;
 
     public AlertService(IUnitOfWork unitOfWork, ICurrentUser currentUser)
     {
@@ -99,6 +102,77 @@ public class AlertService : IAlertService
         await _unitOfWork.SaveChangesAsync();
 
         return ApiResponse<string>.Ok("OK", "Token registered successfully.");
+    }
+
+    public async Task<ApiResponse<AlertReportResponseDto>> GetAlertReportAsync(Guid vehicleId, DateTime from, DateTime to)
+    {
+        var uid = _currentUser.FirebaseUid;
+        if (string.IsNullOrEmpty(uid))
+        {
+            return ApiResponse<AlertReportResponseDto>.Fail(
+                (int)HttpStatusCode.Unauthorized, "Authentication required.", "No valid session found.");
+        }
+
+        if (to <= from)
+        {
+            return ApiResponse<AlertReportResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest, "Invalid date range.", "'to' must be after 'from'.");
+        }
+
+        if ((to - from).TotalDays > MaxReportRangeDays)
+        {
+            return ApiResponse<AlertReportResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest,
+                "Date range too large.",
+                $"Reports are limited to {MaxReportRangeDays} days per request. " +
+                $"Split longer ranges into multiple calls.");
+        }
+
+        var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(uid);
+        if (customer is null)
+        {
+            return ApiResponse<AlertReportResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound, "Profile not found.", "No customer profile exists for this account.");
+        }
+
+        var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId);
+        if (vehicle is null)
+        {
+            return ApiResponse<AlertReportResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'.");
+        }
+
+        bool isOwner = vehicle.CustomerId == customer.CustomerId;
+        bool hasAcceptedShare = false;
+        if (!_currentUser.IsStaff && !isOwner)
+        {
+            var share = await _unitOfWork.VehicleShares.GetByVehicleAndSharedWithAsync(vehicleId, customer.CustomerId);
+            hasAcceptedShare = share is not null && share.Status == VehicleShareStatus.Accepted;
+        }
+
+        if (!_currentUser.IsStaff && !isOwner && !hasAcceptedShare && !vehicle.IsDemoVehicle)
+        {
+            return ApiResponse<AlertReportResponseDto>.Fail(
+                (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId}'.");
+        }
+
+        var alerts = await _unitOfWork.Alerts.GetByVehicleAndDateRangeAsync(vehicleId, from, to);
+
+        var countsByType = alerts
+            .GroupBy(a => a.AlertType.ToString())
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var report = new AlertReportResponseDto
+        {
+            VehicleId = vehicleId,
+            From = from,
+            To = to,
+            TotalCount = alerts.Count,
+            CountsByType = countsByType,
+            Alerts = alerts.Select(ToDto).ToList()
+        };
+
+        return ApiResponse<AlertReportResponseDto>.Ok(report, "Alert report retrieved successfully.");
     }
 
     private static AlertResponseDto ToDto(Alert alert)

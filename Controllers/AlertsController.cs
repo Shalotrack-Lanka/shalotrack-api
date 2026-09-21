@@ -19,8 +19,6 @@ public class AlertsController : ControllerBase
         _alertService = alertService;
     }
 
-    // vehicleId is optional — GET /api/Alerts?vehicleId=... filters to one
-    // vehicle; omitting it returns alerts across all of the caller's vehicles.
     [HttpGet]
     public async Task<IActionResult> GetMyAlerts(
         [FromQuery] int page = 1,
@@ -39,10 +37,16 @@ public class AlertsController : ControllerBase
     }
 
     /// <summary>
-    /// Register or refresh the FCM device token. Called on every app launch.
-    /// Tighter rate limit (auth_sensitive) — 20 req/60s per IP — prevents
-    /// token-flooding attacks that could exhaust FCM send quota.
+    /// NEW -- report generation feature ("Alert Report" card).
     /// </summary>
+    [HttpGet("report")]
+    public async Task<IActionResult> GetAlertReport(
+        [FromQuery] Guid vehicleId, [FromQuery] DateTime from, [FromQuery] DateTime to)
+    {
+        var response = await _alertService.GetAlertReportAsync(vehicleId, from, to);
+        return StatusCode(response.StatusCode, response);
+    }
+
     [HttpPost("register-token")]
     [EnableRateLimiting(RateLimitingExtensions.Policies.AuthSensitive)]
     public async Task<IActionResult> RegisterToken([FromBody] RegisterFcmTokenDto dto)

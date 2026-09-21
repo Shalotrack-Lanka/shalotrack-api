@@ -22,9 +22,6 @@ public class AlertRepository : IAlertRepository
             .Include(a => a.Vehicle)
             .Where(a => a.Vehicle.CustomerId == customerId);
 
-        // NEW: still combined with the CustomerId filter above, so a
-        // vehicleId belonging to a different customer just yields an
-        // empty result rather than exposing anything.
         if (vehicleId.HasValue)
         {
             query = query.Where(a => a.VehicleId == vehicleId.Value);
@@ -69,7 +66,6 @@ public class AlertRepository : IAlertRepository
                 && a.TriggeredAt < before);
     }
 
-    // NEW -- for Value/stats.
     public async Task<int> CountByVehicleAndTypeAsync(Guid vehicleId, AlertType alertType, DateTime from, DateTime to)
     {
         return await _context.Alerts
@@ -78,5 +74,18 @@ public class AlertRepository : IAlertRepository
                 && a.AlertType == alertType
                 && a.TriggeredAt >= from
                 && a.TriggeredAt <= to);
+    }
+
+    // NEW -- report generation feature (Alert Report).
+    public async Task<List<Alert>> GetByVehicleAndDateRangeAsync(Guid vehicleId, DateTime from, DateTime to)
+    {
+        return await _context.Alerts
+            .AsNoTracking()
+            .Include(a => a.Vehicle)
+            .Where(a => a.VehicleId == vehicleId
+                && a.TriggeredAt >= from
+                && a.TriggeredAt <= to)
+            .OrderByDescending(a => a.TriggeredAt)
+            .ToListAsync();
     }
 }
