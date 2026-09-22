@@ -59,11 +59,20 @@ builder.Services.AddShaloTrackRateLimiting();
 // WithOrigins() is explicit -- AllowAnyOrigin() is intentionally NOT used
 // because it is incompatible with AllowCredentials() and would silently
 // break SignalR WebSocket negotiation in all browsers.
+//
+// Origins are read from Cors:AllowedOrigins in config so that local dev
+// can extend the list via appsettings.Development.json without touching
+// this file. Production appsettings.json only lists the real domain.
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()
+    ?? ["https://fleet.shalotrack.com"];
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("CustomerPortal", policy =>
     {
-        policy.WithOrigins("https://fleet.shalotrack.com")
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials(); // Required for SignalR WebSocket handshake
