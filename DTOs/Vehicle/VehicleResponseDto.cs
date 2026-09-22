@@ -30,6 +30,11 @@ public class VehicleResponseDto
 
     public String? Imei { get; set; }
 
+    // NEW -- the one, shared demo vehicle visible to every customer.
+    // Lets clients (fleet portal, Android app) label / restrict it without
+    // a separate API call. False for all regular customer-owned vehicles.
+    public bool IsDemoVehicle { get; set; }
+
     // NEW -- full GPS device details, requested explicitly for the
     // redesigned Details screen. All null when HasGpsDevice is false.
     public string? SimNumber { get; set; }

@@ -99,6 +99,15 @@ public class VehicleService : IVehicleService
 
         var vehicles = await _unitOfWork.Vehicles.GetByCustomerAsync(customerId);
 
+        // Append the shared demo vehicle so every customer sees it alongside
+        // their own fleet. GetDemoVehicleAsync returns null when no demo
+        // vehicle has been designated yet, making this a safe no-op.
+        var demoVehicle = await _unitOfWork.Vehicles.GetDemoVehicleAsync();
+        if (demoVehicle is not null && !vehicles.Any(v => v.VehicleId == demoVehicle.VehicleId))
+        {
+            vehicles.Add(demoVehicle);
+        }
+
         var dtoList = vehicles
             .Select(ToDto)
             .ToList();
@@ -437,6 +446,10 @@ public class VehicleService : IVehicleService
             FuelType = vehicle.FuelType,
             HasGpsDevice = activeAssignment != null,
             Imei = activeAssignment?.Device?.ImeiNumber,   // NEW
+
+            // NEW -- the shared demo vehicle flag so clients can label /
+            // restrict it without a separate API call.
+            IsDemoVehicle = vehicle.IsDemoVehicle,
 
             // NEW -- full GPS device details, requested explicitly for
             // the redesigned Details screen. ActivationStatus is an enum
