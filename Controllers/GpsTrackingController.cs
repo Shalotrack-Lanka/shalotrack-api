@@ -12,8 +12,7 @@ public class GpsTrackingController : ControllerBase
 {
     private readonly IGpsTrackingService _gpsTrackingService;
 
-    public GpsTrackingController(
-        IGpsTrackingService gpsTrackingService)
+    public GpsTrackingController(IGpsTrackingService gpsTrackingService)
     {
         _gpsTrackingService = gpsTrackingService;
     }
@@ -23,11 +22,19 @@ public class GpsTrackingController : ControllerBase
     /// the service enforces that the caller owns it (or is staff).
     /// </summary>
     [HttpGet]
-    public async Task<IActionResult> Get(
-        [FromQuery] GpsTrackingFilter filter)
+    public async Task<IActionResult> Get([FromQuery] GpsTrackingFilter filter)
     {
-        var response = await _gpsTrackingService.GetAsync(filter);
+        // Npgsql 6+ modern-timestamp mode requires DateTimeKind.Utc for all
+        // timestamptz column comparisons.  ASP.NET Core model-binding produces
+        // DateTimeKind.Unspecified from query-string values — Npgsql rejects those
+        // at runtime with an InvalidOperationException.  Normalise here so callers
+        // never need to append a 'Z' suffix.
+        if (filter.From.HasValue)
+            filter.From = DateTime.SpecifyKind(filter.From.Value, DateTimeKind.Utc);
+        if (filter.To.HasValue)
+            filter.To = DateTime.SpecifyKind(filter.To.Value, DateTimeKind.Utc);
 
+        var response = await _gpsTrackingService.GetAsync(filter);
         return StatusCode(response.StatusCode, response);
     }
 
@@ -41,6 +48,12 @@ public class GpsTrackingController : ControllerBase
         [FromQuery] DateTime from,
         [FromQuery] DateTime to)
     {
+        // Same Npgsql 6+ requirement: DateTimeKind.Utc is mandatory for timestamptz.
+        // The fleet portal and Android app both send bare ISO-8601 strings without a
+        // timezone suffix, so we normalise at the controller boundary.
+        from = DateTime.SpecifyKind(from, DateTimeKind.Utc);
+        to = DateTime.SpecifyKind(to, DateTimeKind.Utc);
+
         var response = await _gpsTrackingService.GetTripsSummaryAsync(vehicleId, from, to);
         return StatusCode(response.StatusCode, response);
     }
