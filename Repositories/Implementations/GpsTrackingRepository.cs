@@ -11,69 +11,52 @@ public class GpsTrackingRepository : IGpsTrackingRepository
 {
     private readonly ShaloTrackDbContext _context;
 
-    public GpsTrackingRepository(
-        ShaloTrackDbContext context)
+    public GpsTrackingRepository(ShaloTrackDbContext context)
     {
         _context = context;
     }
 
-    public async Task<List<GpsTrackingResponseDto>> GetAsync(
-        GpsTrackingFilter filter)
+    public async Task<List<GpsTrackingResponseDto>> GetAsync(GpsTrackingFilter filter)
     {
-        IQueryable<Models.GpsTracking> query =
-            _context.GpsTrackings
-                .AsNoTracking();
+        IQueryable<Models.GpsTracking> query = _context.GpsTrackings.AsNoTracking();
 
-        // Device Filter
         if (filter.DeviceId.HasValue)
-        {
-            query = query.Where(x =>
-                x.DeviceId == filter.DeviceId.Value);
-        }
+            query = query.Where(x => x.DeviceId == filter.DeviceId.Value);
 
-        // Vehicle Filter
         if (filter.VehicleId.HasValue)
-        {
             query = query.Where(x =>
                 x.Device.DeviceAssignments.Any(a =>
                     a.VehicleId == filter.VehicleId.Value &&
                     a.Status == Enums.AssignmentStatus.Active));
-        }
 
-        // Date From
         if (filter.From.HasValue)
-        {
-            query = query.Where(x =>
-                x.EventTime >= filter.From.Value);
-        }
+            query = query.Where(x => x.EventTime >= filter.From.Value);
 
-        // Date To
         if (filter.To.HasValue)
-        {
-            query = query.Where(x =>
-                x.EventTime <= filter.To.Value);
-        }
+            query = query.Where(x => x.EventTime <= filter.To.Value);
 
-        query = query
-            .OrderByDescending(x => x.EventTime);
+        query = query.OrderByDescending(x => x.EventTime)
+                     .Skip((filter.Page - 1) * filter.PageSize)
+                     .Take(filter.PageSize);
 
-        query = query
-            .Skip((filter.Page - 1) * filter.PageSize)
-            .Take(filter.PageSize);
-
-        return await query
-            .Select(GpsTrackingMappings.ToResponseDto)
-            .ToListAsync();
+        return await query.Select(GpsTrackingMappings.ToResponseDto).ToListAsync();
     }
 
-    public async Task<List<TrackingPointRaw>> GetPointsForTripsAsync(Guid vehicleId, DateTime from, DateTime to)
+    /// <inheritdoc cref="IGpsTrackingRepository.GetPointsForTripsAsync"/>
+    public async Task<List<TrackingPointRaw>> GetPointsForTripsAsync(
+        Guid vehicleId, DateTime from, DateTime to, bool isDemoVehicle = false)
     {
-        // Unpaged, ascending order — needed to walk the sequence correctly for trip
-        // detection. Never exposed to the client directly; only the computed summary is.
-        return await _context.GpsTrackings
-            .AsNoTracking()
-            .Where(x => x.Device.DeviceAssignments.Any(a =>
-                a.VehicleId == vehicleId && a.Status == Enums.AssignmentStatus.Active))
+        IQueryable<Models.GpsTracking> query = _context.GpsTrackings.AsNoTracking();
+
+        // For the demo vehicle we intentionally skip the Active-status check:
+        // the demo must show GPS history regardless of the current assignment
+        // lifecycle so that every customer can see all platform capabilities.
+        query = isDemoVehicle
+            ? query.Where(x => x.Device.DeviceAssignments.Any(a => a.VehicleId == vehicleId))
+            : query.Where(x => x.Device.DeviceAssignments.Any(a =>
+                  a.VehicleId == vehicleId && a.Status == Enums.AssignmentStatus.Active));
+
+        return await query
             .Where(x => x.EventTime >= from && x.EventTime <= to)
             .OrderBy(x => x.EventTime)
             .Select(x => new TrackingPointRaw
@@ -86,7 +69,6 @@ public class GpsTrackingRepository : IGpsTrackingRepository
             .ToListAsync();
     }
 
-    // NEW -- Phase 3b
     public async Task<int> CountByDeviceInRangeAsync(Guid deviceId, DateTime from, DateTime to)
     {
         return await _context.GpsTrackings
@@ -94,9 +76,6 @@ public class GpsTrackingRepository : IGpsTrackingRepository
             .CountAsync();
     }
 
-    // NEW -- Phase 3b. ExecuteDeleteAsync issues a single SQL DELETE server-side
-    // -- does not load rows into memory first, correct choice for a table that
-    // can hold thousands of rows for even a short trip window.
     public async Task<int> DeleteByDeviceInRangeAsync(Guid deviceId, DateTime from, DateTime to)
     {
         return await _context.GpsTrackings
