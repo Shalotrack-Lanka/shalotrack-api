@@ -20,6 +20,17 @@ public class VehicleShareRepository : IVehicleShareRepository
         await _context.VehicleShares.AddAsync(share);
     }
 
+    /// <summary>
+    /// Attaches the entity and marks all scalar properties as Modified so
+    /// SaveChangesAsync generates an UPDATE.  Call this before SaveChangesAsync
+    /// whenever you mutate a share fetched via any query method, because the
+    /// DbContext is configured with QueryTrackingBehavior.NoTracking globally.
+    /// </summary>
+    public void Update(VehicleShare share)
+    {
+        _context.VehicleShares.Update(share);
+    }
+
     public async Task<VehicleShare?> GetByIdAsync(Guid shareId)
     {
         return await _context.VehicleShares
@@ -59,7 +70,7 @@ public class VehicleShareRepository : IVehicleShareRepository
         return await _context.VehicleShares
             .AsNoTracking()
             .Include(s => s.Vehicle)
-                .ThenInclude(v => v.CurrentLocation) // NEW -- needed to merge into the dashboard with live location data
+                .ThenInclude(v => v.CurrentLocation) // needed to merge into the dashboard with live location data
             .Include(s => s.OwnerCustomer)
             .Where(s => s.SharedWithCustomerId == sharedWithCustomerId && s.Status == VehicleShareStatus.Accepted)
             .OrderByDescending(s => s.RespondedAt)

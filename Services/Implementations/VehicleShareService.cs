@@ -144,6 +144,7 @@ public class VehicleShareService : IVehicleShareService
 
         share.Status = dto.Accept ? VehicleShareStatus.Accepted : VehicleShareStatus.Declined;
         share.RespondedAt = DateTime.UtcNow;
+        _unitOfWork.VehicleShares.Update(share); // Required: DbContext is NoTracking globally — attach & mark Modified before save
         await _unitOfWork.SaveChangesAsync();
 
         try
@@ -185,6 +186,7 @@ public class VehicleShareService : IVehicleShareService
 
         share.Status = VehicleShareStatus.Revoked;
         share.RespondedAt = DateTime.UtcNow;
+        _unitOfWork.VehicleShares.Update(share); // Required: DbContext is NoTracking globally — attach & mark Modified before save
         await _unitOfWork.SaveChangesAsync();
 
         return ApiResponse<string>.Ok("OK", "Share revoked.");
