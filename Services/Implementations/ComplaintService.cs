@@ -179,6 +179,17 @@ public class ComplaintService : IComplaintService
             "Complaints retrieved successfully.");
     }
 
+    // NEW -- backs the admin portal's Resolved Complaints tab. See
+    // ComplaintRepository.GetResolvedForAdminAsync for why GetForAdminAsync
+    // above can never surface a resolved complaint.
+    public async Task<ApiResponse<IReadOnlyList<ComplaintResponseDto>>> GetResolvedForAdminAsync()
+    {
+        var complaints = await _unitOfWork.Complaints.GetResolvedForAdminAsync();
+        return ApiResponse<IReadOnlyList<ComplaintResponseDto>>.Ok(
+            complaints.Select(c => ToDto(c, c.Vehicle)).ToList(),
+            "Resolved complaints retrieved successfully.");
+    }
+
     public async Task<ApiResponse<ComplaintResponseDto>> AddInternalReplyAsync(Guid complaintId, InternalPostComplaintReplyDto dto)
     {
         var complaint = await _unitOfWork.Complaints.GetByIdAsync(complaintId);

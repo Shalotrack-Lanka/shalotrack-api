@@ -16,14 +16,14 @@ public interface IComplaintService
 
     Task<ApiResponse<IReadOnlyList<ComplaintResponseDto>>> GetByDealerAsync(int dealerId);
     Task<ApiResponse<IReadOnlyList<ComplaintResponseDto>>> GetForAdminAsync();
+
+    // NEW -- backs the admin portal's Resolved Complaints tab. See
+    // IComplaintRepository.GetResolvedForAdminAsync for why GetForAdminAsync
+    // above can't serve this.
+    Task<ApiResponse<IReadOnlyList<ComplaintResponseDto>>> GetResolvedForAdminAsync();
+
     Task<ApiResponse<ComplaintResponseDto>> AddInternalReplyAsync(Guid complaintId, InternalPostComplaintReplyDto dto);
 
-    // dealerId is optional and defaults to null (admin calls omit it and
-    // keep behaving exactly as before). When a dealer calls one of these,
-    // Laravel passes its own dealer's ID, and the service rejects the
-    // request as not-found unless that ID matches complaint.DealerId --
-    // closes the cross-dealer IDOR that existed when these methods acted
-    // on any complaintId with no ownership check at all.
     Task<ApiResponse<ComplaintResponseDto>> EscalateAsync(Guid complaintId, int? dealerId = null);
     Task<ApiResponse<ComplaintResponseDto>> ResolveAsync(Guid complaintId, int? dealerId = null);
     Task<ApiResponse<ComplaintResponseDto>> CloseAsync(Guid complaintId, int? dealerId = null);

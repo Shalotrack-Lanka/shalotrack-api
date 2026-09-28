@@ -36,6 +36,17 @@ public class InternalComplaintsController : ControllerBase
         return StatusCode(response.StatusCode, response);
     }
 
+    // NEW -- backs the admin portal's Resolved Complaints tab.
+    // GetForAdmin above only ever returns WithAdmin-status complaints by
+    // design (see ComplaintRepository), so it structurally can never
+    // include a resolved one. This is the endpoint that actually can.
+    [HttpGet("for-admin/resolved")]
+    public async Task<IActionResult> GetResolvedForAdmin()
+    {
+        var response = await _complaintService.GetResolvedForAdminAsync();
+        return StatusCode(response.StatusCode, response);
+    }
+
     [HttpPost("{complaintId:guid}/reply")]
     public async Task<IActionResult> Reply(Guid complaintId, [FromBody] InternalPostComplaintReplyDto dto)
     {
