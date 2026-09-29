@@ -32,6 +32,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<VehicleShare> VehicleShares => Set<VehicleShare>();
     public DbSet<Complaint> Complaints => Set<Complaint>();
     public DbSet<ComplaintReply> ComplaintReplies => Set<ComplaintReply>();
+    public DbSet<DeviceSubscriptionStatus> DeviceSubscriptionStatuses => Set<DeviceSubscriptionStatus>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -235,5 +236,13 @@ public class ShaloTrackDbContext : DbContext
             .WithMany(c => c.Replies)
             .HasForeignKey(r => r.ComplaintId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // DeviceSubscriptionStatus.ImeiNumber is the [Key] (string), not an
+        // identity column -- rows come from the Admin portal via
+        // subscription-status-sync, keyed by IMEI the same way
+        // SetupShalotrackDevice already is.
+        modelBuilder.Entity<DeviceSubscriptionStatus>()
+            .Property(d => d.ImeiNumber)
+            .ValueGeneratedNever();
     }
 }
