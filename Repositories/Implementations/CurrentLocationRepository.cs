@@ -41,4 +41,11 @@ public class CurrentLocationRepository : ICurrentLocationRepository
             .Select(CurrentLocationMappings.ToResponseDto)
             .FirstOrDefaultAsync();
     }
+
+    public async Task RemoveByDeviceAsync(Guid deviceId)
+    {
+        var row = await _context.CurrentLocations.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
+        if (row is not null)
+            _context.CurrentLocations.Remove(row);
+    }
 }

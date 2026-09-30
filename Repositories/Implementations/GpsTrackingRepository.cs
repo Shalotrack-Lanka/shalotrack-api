@@ -27,7 +27,12 @@ public class GpsTrackingRepository : IGpsTrackingRepository
             query = query.Where(x =>
                 x.Device.DeviceAssignments.Any(a =>
                     a.VehicleId == filter.VehicleId.Value &&
-                    a.Status == Enums.AssignmentStatus.Active));
+                    (a.Status == Enums.AssignmentStatus.Active ||
+                     // a device this vehicle used before a replacement: only while it was assigned
+                     (a.Status == Enums.AssignmentStatus.Removed &&
+                      a.RemovedAt != null &&
+                      x.EventTime >= a.AssignedAt &&
+                      x.EventTime <= a.RemovedAt))));
 
         if (filter.From.HasValue)
             query = query.Where(x => x.EventTime >= filter.From.Value);
@@ -54,7 +59,13 @@ public class GpsTrackingRepository : IGpsTrackingRepository
         query = isDemoVehicle
             ? query.Where(x => x.Device.DeviceAssignments.Any(a => a.VehicleId == vehicleId))
             : query.Where(x => x.Device.DeviceAssignments.Any(a =>
-                  a.VehicleId == vehicleId && a.Status == Enums.AssignmentStatus.Active));
+                  a.VehicleId == vehicleId &&
+                  (a.Status == Enums.AssignmentStatus.Active ||
+                   // a device this vehicle used before a replacement: only while it was assigned
+                   (a.Status == Enums.AssignmentStatus.Removed &&
+                    a.RemovedAt != null &&
+                    x.EventTime >= a.AssignedAt &&
+                    x.EventTime <= a.RemovedAt))));
 
         return await query
             .Where(x => x.EventTime >= from && x.EventTime <= to)

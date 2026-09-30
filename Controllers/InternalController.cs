@@ -22,6 +22,7 @@ public class InternalController : ControllerBase
     private readonly ISetupShalotrackDeviceService _setupShalotrackDeviceService;
     private readonly IDeviceCommandService _deviceCommandService;
     private readonly ISubscriptionGateRepository _subscriptionGate;
+    private readonly IDeviceReplacementService _deviceReplacementService;
 
     private const int MaxSubscriptionSyncItems = 10000;
     private static readonly Regex ImeiPattern = new(@"^\d{15}$", RegexOptions.Compiled);
@@ -32,7 +33,8 @@ public class InternalController : ControllerBase
         IGpsTrackingService gpsTrackingService,
         ISetupShalotrackDeviceService setupShalotrackDeviceService,
         IDeviceCommandService deviceCommandService,
-        ISubscriptionGateRepository subscriptionGate)
+        ISubscriptionGateRepository subscriptionGate,
+        IDeviceReplacementService deviceReplacementService)
     {
         _customerService = customerService;
         _vehicleService = vehicleService;
@@ -40,6 +42,7 @@ public class InternalController : ControllerBase
         _setupShalotrackDeviceService = setupShalotrackDeviceService;
         _deviceCommandService = deviceCommandService;
         _subscriptionGate = subscriptionGate;
+        _deviceReplacementService = deviceReplacementService;
     }
 
     [HttpGet("customers-sync")]
@@ -146,6 +149,21 @@ public class InternalController : ControllerBase
 
         var written = await _subscriptionGate.UpsertManyAsync(items);
         return Ok(ApiResponse<int>.Ok(written, "Subscription status synced."));
+    }
+
+    /// <summary>
+    /// Called by the admin portal after replacing a faulty device: moves the vehicle from the old
+    /// device to the new one so the app stops showing old-device data. Protected by
+    /// AdminSyncKeyMiddleware. Idempotent.
+    /// </summary>
+    [HttpPost("device-replacement-sync")]
+    public async Task<IActionResult> DeviceReplacementSync([FromBody] DeviceReplacementSyncDto dto)
+    {
+        if (dto is null)
+            return StatusCode(400, ApiResponse<string>.Fail(400, "Request body is required."));
+
+        var response = await _deviceReplacementService.ReplaceAsync(dto);
+        return StatusCode(response.StatusCode, response);
     }
 
     /// <summary>

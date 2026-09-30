@@ -254,37 +254,55 @@ public class GpsTrackingService : IGpsTrackingService
         // ── 4. S3 archive merge ────────────────────────────────────────────────
         if (!string.IsNullOrEmpty(_bucketName))
         {
+            // The current device over the whole window, plus any device this vehicle used before
+            // a replacement, clipped to the period it was actually assigned (so its data never
+            // shows outside the time it belonged to this vehicle).
+            var s3Targets = new List<(Guid DeviceId, DateTime From, DateTime To)>();
             if (resolvedDeviceId.HasValue)
+                s3Targets.Add((resolvedDeviceId.Value, from, to));
+
+            if (!isDemo && vehicle?.DeviceAssignments is not null)
             {
-                var s3Points = await ReadPointsFromS3Async(resolvedDeviceId.Value, from, to);
-
-                if (s3Points.Count > 0)
+                foreach (var a in vehicle.DeviceAssignments.Where(a =>
+                             a.Status == AssignmentStatus.Removed && a.RemovedAt.HasValue && a.DeviceId != resolvedDeviceId))
                 {
-                    _logger.LogInformation(
-                        "GpsTrackingService: S3 returned {S3Count} point(s) for device {DeviceId}. " +
-                        "Supabase returned {DbCount} point(s). Merging.",
-                        s3Points.Count, resolvedDeviceId.Value, supabasePoints.Count);
-
-                    var existingTimes = new HashSet<DateTime>(supabasePoints.Select(p => p.EventTime));
-
-                    foreach (var s3Point in s3Points)
-                    {
-                        if (!existingTimes.Contains(s3Point.EventTime))
-                            points.Add(s3Point);
-                    }
-
-                    points.Sort((a, b) => a.EventTime.CompareTo(b.EventTime));
-
-                    _logger.LogInformation(
-                        "GpsTrackingService: Merged total {Total} point(s) for vehicle {VehicleId}.",
-                        points.Count, vehicleId);
+                    var clippedFrom = from > a.AssignedAt ? from : a.AssignedAt;
+                    var clippedTo = to < a.RemovedAt!.Value ? to : a.RemovedAt.Value;
+                    if (clippedFrom < clippedTo)
+                        s3Targets.Add((a.DeviceId, clippedFrom, clippedTo));
                 }
             }
-            else
+
+            if (s3Targets.Count == 0)
             {
                 _logger.LogWarning(
                     "GpsTrackingService: Could not resolve DeviceId for vehicle {VehicleId} — S3 merge skipped.",
                     vehicleId);
+            }
+
+            foreach (var target in s3Targets)
+            {
+                var s3Points = await ReadPointsFromS3Async(target.DeviceId, target.From, target.To);
+                if (s3Points.Count == 0) continue;
+
+                _logger.LogInformation(
+                    "GpsTrackingService: S3 returned {S3Count} point(s) for device {DeviceId}. " +
+                    "Supabase returned {DbCount} point(s). Merging.",
+                    s3Points.Count, target.DeviceId, supabasePoints.Count);
+
+                var existingTimes = new HashSet<DateTime>(points.Select(p => p.EventTime));
+
+                foreach (var s3Point in s3Points)
+                {
+                    if (existingTimes.Add(s3Point.EventTime))
+                        points.Add(s3Point);
+                }
+
+                points.Sort((a, b) => a.EventTime.CompareTo(b.EventTime));
+
+                _logger.LogInformation(
+                    "GpsTrackingService: Merged total {Total} point(s) for vehicle {VehicleId}.",
+                    points.Count, vehicleId);
             }
         }
 
