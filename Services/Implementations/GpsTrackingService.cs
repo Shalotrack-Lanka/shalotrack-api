@@ -36,6 +36,7 @@ public class GpsTrackingService : IGpsTrackingService
     private readonly string? _bucketName;
     private readonly IArchivedTripCache _archivedTripCache;
     private readonly ILogger<GpsTrackingService> _logger;
+    private readonly ISubscriptionGateService _subscriptionGate;
 
     private const int MaxTripReportDays = 90;
     private const string S3ArchivePrefix = "archive/";
@@ -47,7 +48,8 @@ public class GpsTrackingService : IGpsTrackingService
         IAmazonS3 s3Client,
         IConfiguration configuration,
         IArchivedTripCache archivedTripCache,
-        ILogger<GpsTrackingService> logger)
+        ILogger<GpsTrackingService> logger,
+        ISubscriptionGateService subscriptionGate)
     {
         _repository = repository;
         _unitOfWork = unitOfWork;
@@ -55,6 +57,7 @@ public class GpsTrackingService : IGpsTrackingService
         _s3Client = s3Client;
         _archivedTripCache = archivedTripCache;
         _logger = logger;
+        _subscriptionGate = subscriptionGate;
         _bucketName = configuration["GpsArchive:BucketName"];
     }
 
@@ -89,6 +92,11 @@ public class GpsTrackingService : IGpsTrackingService
                     (int)HttpStatusCode.NotFound, "Vehicle not found.",
                     $"No vehicle exists with ID '{filter.VehicleId.Value}'.");
         }
+
+        if (await _subscriptionGate.IsRenewalRequiredAsync(filter.VehicleId.Value))
+            return ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>.Fail(
+                (int)HttpStatusCode.PaymentRequired, "Subscription renewal required.",
+                ISubscriptionGateService.RenewalRequiredCode);
 
         if (filter.PageSize > 500) filter.PageSize = 500;
 
@@ -173,6 +181,11 @@ public class GpsTrackingService : IGpsTrackingService
                     (int)HttpStatusCode.NotFound, "Vehicle not found.",
                     $"No vehicle exists with ID '{vehicleId}'.");
         }
+
+        if (await _subscriptionGate.IsRenewalRequiredAsync(vehicleId))
+            return ApiResponse<TripsReportResponseDto>.Fail(
+                (int)HttpStatusCode.PaymentRequired, "Subscription renewal required.",
+                ISubscriptionGateService.RenewalRequiredCode);
 
         var merged = await GetMergedPointsAsync(vehicleId, from, to);
         return ApiResponse<TripsReportResponseDto>.Ok(

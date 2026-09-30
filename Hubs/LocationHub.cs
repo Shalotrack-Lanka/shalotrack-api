@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.Enums;
 using ShaloTrack_API.Repositories.Interfaces;
+using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Hubs;
 
@@ -18,11 +19,13 @@ public class LocationHub : Hub
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
+    private readonly ISubscriptionGateService _subscriptionGate;
 
-    public LocationHub(IUnitOfWork unitOfWork, ICurrentUser currentUser)
+    public LocationHub(IUnitOfWork unitOfWork, ICurrentUser currentUser, ISubscriptionGateService subscriptionGate)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _subscriptionGate = subscriptionGate;
     }
 
     public async Task JoinVehicleGroup(string vehicleId)
@@ -64,6 +67,11 @@ public class LocationHub : Hub
                 // Same principle as REST: don't confirm existence to a non-owner.
                 throw new HubException("Vehicle not found.");
             }
+        }
+
+        if (await _subscriptionGate.IsRenewalRequiredAsync(vehicleGuid))
+        {
+            throw new HubException(ISubscriptionGateService.RenewalRequiredCode);
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, vehicleId);

@@ -13,15 +13,18 @@ public class CurrentLocationService : ICurrentLocationService
     private readonly ICurrentLocationRepository _repository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
+    private readonly ISubscriptionGateService _subscriptionGate;
 
     public CurrentLocationService(
         ICurrentLocationRepository repository,
         IUnitOfWork unitOfWork,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        ISubscriptionGateService subscriptionGate)
     {
         _repository = repository;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _subscriptionGate = subscriptionGate;
     }
 
     public async Task<ApiResponse<IReadOnlyList<CurrentLocationResponseDto>>> GetAllAsync()
@@ -46,6 +49,10 @@ public class CurrentLocationService : ICurrentLocationService
         {
             return NotFound();
         }
+        if (await _subscriptionGate.IsRenewalRequiredAsync(vehicleId))
+        {
+            return RenewalRequired();
+        }
         return ApiResponse<CurrentLocationResponseDto>.Ok(location, "Current location retrieved successfully.");
     }
 
@@ -56,6 +63,10 @@ public class CurrentLocationService : ICurrentLocationService
         if (location is null || !await OwnsVehicleAsync(location.VehicleId))
         {
             return NotFound();
+        }
+        if (await _subscriptionGate.IsRenewalRequiredAsync(location.VehicleId))
+        {
+            return RenewalRequired();
         }
         return ApiResponse<CurrentLocationResponseDto>.Ok(location, "Current location retrieved successfully.");
     }
@@ -94,6 +105,11 @@ public class CurrentLocationService : ICurrentLocationService
         var share = await _unitOfWork.VehicleShares.GetByVehicleAndSharedWithAsync(vehicleId, customer.CustomerId);
         return share is not null && share.Status == VehicleShareStatus.Accepted;
     }
+
+    private static ApiResponse<CurrentLocationResponseDto> RenewalRequired() =>
+        ApiResponse<CurrentLocationResponseDto>.Fail(
+            (int)HttpStatusCode.PaymentRequired, "Subscription renewal required.",
+            ISubscriptionGateService.RenewalRequiredCode);
 
     private static ApiResponse<CurrentLocationResponseDto> NotFound() =>
         ApiResponse<CurrentLocationResponseDto>.Fail(
