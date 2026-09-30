@@ -44,4 +44,43 @@ public class SubscriptionGateRepository : ISubscriptionGateRepository
             existing.UpdatedAt = DateTime.UtcNow;
         }
     }
+
+    public async Task<int> UpsertManyAsync(IEnumerable<(string Imei, bool IsActive, DateTime? ExpiresAt)> items)
+    {
+        // Last entry wins if an IMEI is repeated in one request.
+        var wanted = items
+            .GroupBy(i => i.Imei)
+            .Select(g => g.Last())
+            .ToList();
+        if (wanted.Count == 0) return 0;
+
+        var imeis = wanted.Select(w => w.Imei).ToList();
+        var existing = await _context.DeviceSubscriptionStatuses
+            .Where(d => imeis.Contains(d.ImeiNumber))
+            .ToDictionaryAsync(d => d.ImeiNumber);
+
+        var now = DateTime.UtcNow;
+        foreach (var (imei, isActive, expiresAt) in wanted)
+        {
+            if (existing.TryGetValue(imei, out var row))
+            {
+                row.IsActive = isActive;
+                row.ExpiresAt = expiresAt;
+                row.UpdatedAt = now;
+            }
+            else
+            {
+                _context.DeviceSubscriptionStatuses.Add(new DeviceSubscriptionStatus
+                {
+                    ImeiNumber = imei,
+                    IsActive = isActive,
+                    ExpiresAt = expiresAt,
+                    UpdatedAt = now,
+                });
+            }
+        }
+
+        await _context.SaveChangesAsync();
+        return wanted.Count;
+    }
 }

@@ -4,6 +4,9 @@ using ShaloTrack_API.Filters;
 using ShaloTrack_API.Responses;
 using ShaloTrack_API.Services.Interfaces;
 using ShaloTrack_API.DTOs.SetupShalotrackDevice;
+using ShaloTrack_API.DTOs.Internal;
+using ShaloTrack_API.Repositories.Interfaces;
+using System.Text.RegularExpressions;
 using System.Linq;
 
 namespace ShaloTrack_API.Controllers;
@@ -18,19 +21,25 @@ public class InternalController : ControllerBase
     private readonly IGpsTrackingService _gpsTrackingService;
     private readonly ISetupShalotrackDeviceService _setupShalotrackDeviceService;
     private readonly IDeviceCommandService _deviceCommandService;
+    private readonly ISubscriptionGateRepository _subscriptionGate;
+
+    private const int MaxSubscriptionSyncItems = 10000;
+    private static readonly Regex ImeiPattern = new(@"^\d{15}$", RegexOptions.Compiled);
 
     public InternalController(
         ICustomerService customerService,
         IVehicleService vehicleService,
         IGpsTrackingService gpsTrackingService,
         ISetupShalotrackDeviceService setupShalotrackDeviceService,
-        IDeviceCommandService deviceCommandService)
+        IDeviceCommandService deviceCommandService,
+        ISubscriptionGateRepository subscriptionGate)
     {
         _customerService = customerService;
         _vehicleService = vehicleService;
         _gpsTrackingService = gpsTrackingService;
         _setupShalotrackDeviceService = setupShalotrackDeviceService;
         _deviceCommandService = deviceCommandService;
+        _subscriptionGate = subscriptionGate;
     }
 
     [HttpGet("customers-sync")]
@@ -104,6 +113,39 @@ public class InternalController : ControllerBase
     {
         var response = await _setupShalotrackDeviceService.UpsertAsync(dto);
         return StatusCode(response.StatusCode, response);
+    }
+
+    /// <summary>
+    /// Receives per-IMEI subscription status from the admin portal (subscriptions:sync-to-api
+    /// and device replacement). Protected by AdminSyncKeyMiddleware. All-or-nothing: any invalid
+    /// item rejects the whole request so a bad payload never half-applies.
+    /// </summary>
+    [HttpPost("subscription-status-sync")]
+    public async Task<IActionResult> SubscriptionStatusSync([FromBody] SubscriptionStatusSyncDto dto)
+    {
+        if (dto?.Devices is null || dto.Devices.Count == 0)
+            return StatusCode(400, ApiResponse<string>.Fail(400, "devices is required."));
+
+        if (dto.Devices.Count > MaxSubscriptionSyncItems)
+            return StatusCode(400, ApiResponse<string>.Fail(400, $"At most {MaxSubscriptionSyncItems} devices per request."));
+
+        var items = new List<(string Imei, bool IsActive, DateTime? ExpiresAt)>(dto.Devices.Count);
+        foreach (var d in dto.Devices)
+        {
+            var imei = d.Imei?.Trim() ?? string.Empty;
+            if (!ImeiPattern.IsMatch(imei))
+                return StatusCode(400, ApiResponse<string>.Fail(400, "Invalid IMEI.", $"'{imei}' is not a 15-digit IMEI."));
+
+            DateTime? expires = d.ExpiresAt.HasValue
+                ? (d.ExpiresAt.Value.Kind == DateTimeKind.Unspecified
+                    ? DateTime.SpecifyKind(d.ExpiresAt.Value, DateTimeKind.Utc)
+                    : d.ExpiresAt.Value.ToUniversalTime())
+                : null;
+            items.Add((imei, d.IsActive, expires));
+        }
+
+        var written = await _subscriptionGate.UpsertManyAsync(items);
+        return Ok(ApiResponse<int>.Ok(written, "Subscription status synced."));
     }
 
     /// <summary>

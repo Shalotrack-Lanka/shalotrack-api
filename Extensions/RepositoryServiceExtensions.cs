@@ -27,6 +27,7 @@ public static class RepositoryServiceExtensions
         services.AddScoped<IVehicleShareRepository, VehicleShareRepository>();
         services.AddScoped<IGeofenceRepository, GeofenceRepository>();
         services.AddScoped<IComplaintRepository, ComplaintRepository>();
+        services.AddScoped<ISubscriptionGateRepository, SubscriptionGateRepository>();
 
         // Unit of Work
         services.AddScoped<IUnitOfWork, UnitOfWork>();
