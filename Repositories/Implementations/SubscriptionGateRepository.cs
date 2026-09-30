@@ -24,7 +24,10 @@ public class SubscriptionGateRepository : ISubscriptionGateRepository
 
     public async Task UpsertAsync(string imei, bool isActive, DateTime? expiresAt)
     {
+        // The DbContext is NoTracking globally, so ask for tracking explicitly, or the
+        // changes below are never saved.
         var existing = await _context.DeviceSubscriptionStatuses
+            .AsTracking()
             .FirstOrDefaultAsync(d => d.ImeiNumber == imei);
 
         if (existing is null)
@@ -55,7 +58,10 @@ public class SubscriptionGateRepository : ISubscriptionGateRepository
         if (wanted.Count == 0) return 0;
 
         var imeis = wanted.Select(w => w.Imei).ToList();
+        // The DbContext is NoTracking globally, so ask for tracking explicitly, or updates to
+        // existing rows are silently not saved (only inserts would work).
         var existing = await _context.DeviceSubscriptionStatuses
+            .AsTracking()
             .Where(d => imeis.Contains(d.ImeiNumber))
             .ToDictionaryAsync(d => d.ImeiNumber);
 
