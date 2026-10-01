@@ -44,6 +44,11 @@ builder.Services.AddHostedService<TripArchivalQueueWorker>();
 // RawPacketRetention:DryRun -- defaults to true (fails safe).
 builder.Services.AddHostedService<RawPacketRetentionWorker>();
 
+// ---- SUBSCRIPTION RENEWAL REMINDERS ----
+// Pushes 14/7/1-day reminders (and a "ended" notice) to customers. Gated by
+// SubscriptionReminders:DryRun -- defaults to true (fails safe: logs only).
+builder.Services.AddHostedService<SubscriptionReminderWorker>();
+
 // ASP.NET Core
 builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();

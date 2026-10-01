@@ -33,6 +33,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<Complaint> Complaints => Set<Complaint>();
     public DbSet<ComplaintReply> ComplaintReplies => Set<ComplaintReply>();
     public DbSet<DeviceSubscriptionStatus> DeviceSubscriptionStatuses => Set<DeviceSubscriptionStatus>();
+    public DbSet<SubscriptionReminderLog> SubscriptionReminderLogs => Set<SubscriptionReminderLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -244,5 +245,10 @@ public class ShaloTrackDbContext : DbContext
         modelBuilder.Entity<DeviceSubscriptionStatus>()
             .Property(d => d.ImeiNumber)
             .ValueGeneratedNever();
+
+        // One reminder per (device, milestone, expiry): the dedupe guard for renewal reminders.
+        modelBuilder.Entity<SubscriptionReminderLog>()
+            .HasIndex(l => new { l.ImeiNumber, l.Milestone, l.ExpiresAt })
+            .IsUnique();
     }
 }
