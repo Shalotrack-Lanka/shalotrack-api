@@ -82,7 +82,13 @@ public class SubscriptionReminderService : ISubscriptionReminderService
             .Distinct()
             .ToList();
 
-        if (allImeis.Count == 0) return new SubscriptionReminderRunResult(0, 0, 0);
+        if (allImeis.Count == 0)
+        {
+            // Say so: a silent run is indistinguishable from a worker that never started.
+            _logger.LogInformation(
+                "SubscriptionReminderService: no devices within the reminder window (dryRun={DryRun}).", dryRun);
+            return new SubscriptionReminderRunResult(0, 0, 0);
+        }
 
         var alreadyLogged = (await _db.SubscriptionReminderLogs
                 .Where(l => allImeis.Contains(l.ImeiNumber))
