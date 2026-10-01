@@ -34,6 +34,8 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<ComplaintReply> ComplaintReplies => Set<ComplaintReply>();
     public DbSet<DeviceSubscriptionStatus> DeviceSubscriptionStatuses => Set<DeviceSubscriptionStatus>();
     public DbSet<SubscriptionReminderLog> SubscriptionReminderLogs => Set<SubscriptionReminderLog>();
+    public DbSet<RenewalRequest> RenewalRequests => Set<RenewalRequest>();
+    public DbSet<RenewalSlip> RenewalSlips => Set<RenewalSlip>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -250,5 +252,41 @@ public class ShaloTrackDbContext : DbContext
         modelBuilder.Entity<SubscriptionReminderLog>()
             .HasIndex(l => new { l.ImeiNumber, l.Milestone, l.ExpiresAt })
             .IsUnique();
+
+        // ---- Customer device renewals ----
+        modelBuilder.Entity<RenewalRequest>(e =>
+        {
+            e.Property(r => r.ImeiNumber).HasMaxLength(32).IsRequired();
+            e.Property(r => r.PaymentReference).HasMaxLength(100);
+            e.Property(r => r.CustomerNote).HasMaxLength(300);
+            e.Property(r => r.SlipSha256).HasMaxLength(64);
+            e.Property(r => r.DecisionReason).HasMaxLength(300);
+            e.Property(r => r.DecidedBy).HasMaxLength(64);
+            e.Property(r => r.AmountLkr).HasPrecision(12, 2);
+
+            e.HasOne(r => r.Customer).WithMany().HasForeignKey(r => r.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(r => r.Vehicle).WithMany().HasForeignKey(r => r.VehicleId).OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(r => new { r.CustomerId, r.CreatedAt });
+            e.HasIndex(r => new { r.Status, r.CreatedAt });
+
+            // At most ONE open request (AwaitingSlip = 0, PendingReview = 1) per vehicle, enforced by
+            // the database so a double-tap or two devices cannot create duplicates.
+            e.HasIndex(r => r.VehicleId)
+                .IsUnique()
+                .HasDatabaseName("IX_RenewalRequests_OpenPerVehicle")
+                .HasFilter("\"Status\" IN (0, 1)");
+        });
+
+        modelBuilder.Entity<RenewalSlip>(e =>
+        {
+            e.Property(s => s.RenewalRequestId).ValueGeneratedNever();
+            e.Property(s => s.ContentType).HasMaxLength(50).IsRequired();
+            e.Property(s => s.Sha256).HasMaxLength(64).IsRequired();
+
+            e.HasOne(s => s.Request).WithOne(r => r.Slip)
+                .HasForeignKey<RenewalSlip>(s => s.RenewalRequestId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 }
