@@ -127,7 +127,8 @@ public class RenewalService : IRenewalService
 
         // An abandoned request that never got a slip must not block the vehicle forever.
         var staleBefore = now.AddDays(-AwaitingSlipExpiryDays);
-        var stale = await _db.RenewalRequests
+        // DbContext is NoTracking globally: AsTracking() is required or the changes below are silently not saved.
+        var stale = await _db.RenewalRequests.AsTracking()
             .Where(r => r.VehicleId == vehicle.VehicleId && r.Status == RenewalStatus.AwaitingSlip && r.CreatedAt < staleBefore)
             .ToListAsync();
         foreach (var s in stale)
@@ -200,7 +201,8 @@ public class RenewalService : IRenewalService
                 $"The slip must be {MaxSlipBytes / (1024 * 1024)} MB or smaller.");
         }
 
-        var request = await _db.RenewalRequests
+        // DbContext is NoTracking globally: AsTracking() is required or the changes below are silently not saved.
+        var request = await _db.RenewalRequests.AsTracking()
             .Include(r => r.Slip)
             .Include(r => r.Vehicle)
             .FirstOrDefaultAsync(r => r.RenewalRequestId == renewalRequestId && r.CustomerId == customer.CustomerId);
@@ -291,7 +293,8 @@ public class RenewalService : IRenewalService
         var customer = await GetCallerAsync();
         if (customer is null) return NotAuthenticatedOrMissing<RenewalResponseDto>();
 
-        var request = await _db.RenewalRequests
+        // DbContext is NoTracking globally: AsTracking() is required or the changes below are silently not saved.
+        var request = await _db.RenewalRequests.AsTracking()
             .Include(r => r.Vehicle)
             .FirstOrDefaultAsync(r => r.RenewalRequestId == renewalRequestId && r.CustomerId == customer.CustomerId);
         if (request is null) return RequestNotFound<RenewalResponseDto>();
@@ -399,7 +402,8 @@ public class RenewalService : IRenewalService
             return ApiResponse<InternalRenewalDto>.Fail((int)HttpStatusCode.BadRequest, "Reason too long.", $"Limit is {MaxReasonLength} characters.");
         }
 
-        var request = await _db.RenewalRequests
+        // DbContext is NoTracking globally: AsTracking() is required or the changes below are silently not saved.
+        var request = await _db.RenewalRequests.AsTracking()
             .Include(r => r.Vehicle)
             .Include(r => r.Customer)
             .FirstOrDefaultAsync(r => r.RenewalRequestId == renewalRequestId);
