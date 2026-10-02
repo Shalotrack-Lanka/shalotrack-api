@@ -17,10 +17,20 @@ namespace ShaloTrack_API.Controllers;
 public class RenewalsController : ControllerBase
 {
     private readonly IRenewalService _renewalService;
+    private readonly IRenewalPackageService _packages;
 
-    public RenewalsController(IRenewalService renewalService)
+    public RenewalsController(IRenewalService renewalService, IRenewalPackageService packages)
     {
         _renewalService = renewalService;
+        _packages = packages;
+    }
+
+    // The price list the app shows: only packages that are active and priced. No margins, ever.
+    [HttpGet("packages")]
+    public async Task<IActionResult> GetPackages(CancellationToken cancellationToken)
+    {
+        var response = await _packages.GetOfferedAsync(cancellationToken);
+        return StatusCode(response.StatusCode, response);
     }
 
     [HttpPost]

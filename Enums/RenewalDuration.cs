@@ -7,5 +7,6 @@ public enum RenewalDuration
     SixMonths = 1,
     OneYear = 2,
     TwoYears = 3,
-    ThreeYears = 4
+    ThreeYears = 4,
+    SixYears = 5
 }

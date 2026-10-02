@@ -4,7 +4,7 @@ public class CreateRenewalDto
 {
     public Guid VehicleId { get; set; }
 
-    /// <summary>ThreeMonths | SixMonths | OneYear | TwoYears | ThreeYears</summary>
+    /// <summary>ThreeMonths | SixMonths | OneYear | TwoYears | ThreeYears | SixYears</summary>
     public string Duration { get; set; } = string.Empty;
 
     /// <summary>BankSlip (default). Gateway is reserved and currently refused.</summary>

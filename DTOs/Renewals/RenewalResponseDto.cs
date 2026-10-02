@@ -9,6 +9,8 @@ public class RenewalResponseDto
     public string PaymentMethod { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public bool HasSlip { get; set; }
+    /// <summary>The price shown to the customer when the request was made. Null for requests made before pricing existed.</summary>
+    public decimal? AmountLkr { get; set; }
     public string? PaymentReference { get; set; }
     public string? DecisionReason { get; set; }
     public DateTime CreatedAt { get; set; }

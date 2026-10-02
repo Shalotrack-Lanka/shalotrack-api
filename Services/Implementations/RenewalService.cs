@@ -67,7 +67,7 @@ public class RenewalService : IRenewalService
         if (!RenewalEnumExtensions.TryParseStrict<RenewalDuration>(dto.Duration, out var duration))
         {
             return ApiResponse<RenewalResponseDto>.Fail((int)HttpStatusCode.BadRequest, "Invalid duration.",
-                "Expected ThreeMonths, SixMonths, OneYear, TwoYears or ThreeYears.");
+                "Expected ThreeMonths, SixMonths, OneYear, TwoYears, ThreeYears or SixYears.");
         }
 
         var method = RenewalPaymentMethod.BankSlip;
@@ -118,6 +118,14 @@ public class RenewalService : IRenewalService
 
         var now = DateTime.UtcNow;
 
+        // The price is fixed here, on the server, from the admin portal's price list. The app never sends
+        // an amount, so a customer cannot pick their own price.
+        var (amount, priceError) = await ResolvePriceAsync(duration);
+        if (priceError is not null)
+        {
+            return ApiResponse<RenewalResponseDto>.Fail((int)HttpStatusCode.BadRequest, "This package is not available.", priceError);
+        }
+
         var gate = await _db.DeviceSubscriptionStatuses.AsNoTracking().FirstOrDefaultAsync(d => d.ImeiNumber == imei);
         if (gate is { IsActive: true, ExpiresAt: not null } && gate.ExpiresAt.Value > now.AddDays(RenewalWindowDays))
         {
@@ -157,6 +165,7 @@ public class RenewalService : IRenewalService
             VehicleId = vehicle.VehicleId,
             ImeiNumber = imei,
             Duration = duration,
+            AmountLkr = amount,
             PaymentMethod = method,
             Status = RenewalStatus.AwaitingSlip,
             PaymentReference = reference,
@@ -345,6 +354,7 @@ public class RenewalService : IRenewalService
                 Status = r.Status.ToString(),
                 Duration = r.Duration.ToString(),
                 PaymentMethod = r.PaymentMethod.ToString(),
+                AmountLkr = r.AmountLkr,
                 ImeiNumber = r.ImeiNumber,
                 VehicleId = r.VehicleId,
                 VehicleNumber = r.Vehicle.VehicleNumber,
@@ -442,6 +452,7 @@ public class RenewalService : IRenewalService
             Duration = request.Duration.ToString(),
             DurationModel = request.Duration.ToAdminModel(),
             PaymentMethod = request.PaymentMethod.ToString(),
+            AmountLkr = request.AmountLkr,
             ImeiNumber = request.ImeiNumber,
             VehicleId = request.VehicleId,
             VehicleNumber = request.Vehicle.VehicleNumber,
@@ -487,6 +498,32 @@ public class RenewalService : IRenewalService
         }
     }
 
+    /// <summary>
+    /// The price to stamp on a new request. Until the admin portal has pushed a price list at all (first
+    /// deployment), requests stay unpriced exactly as before, so renewals never stop because of a missed
+    /// sync. Once a list exists, a package that is missing, inactive or unpriced cannot be ordered.
+    /// </summary>
+    private async Task<(decimal? Amount, string? Error)> ResolvePriceAsync(RenewalDuration duration)
+    {
+        const string notOffered = "This renewal package is not on offer right now. Choose another one or contact support.";
+
+        var code = duration.ToPackageCode();
+        var package = await _db.RenewalPackages.AsNoTracking().FirstOrDefaultAsync(p => p.Code == code);
+        if (package is not null)
+        {
+            if (!package.IsOffered) return (null, notOffered);
+            return (package.CustomerPriceLkr, null);
+        }
+
+        if (await _db.RenewalPackages.AsNoTracking().AnyAsync())
+        {
+            return (null, notOffered);
+        }
+
+        _logger.LogWarning("No renewal price list has been synced yet; creating an unpriced renewal request.");
+        return (null, null);
+    }
+
     private async Task<Customer?> GetCallerAsync()
     {
         var uid = _currentUser.FirebaseUid;
@@ -519,6 +556,7 @@ public class RenewalService : IRenewalService
         VehicleNumber = vehicleNumber,
         Duration = r.Duration.ToString(),
         PaymentMethod = r.PaymentMethod.ToString(),
+        AmountLkr = r.AmountLkr,
         Status = r.Status.ToString(),
         HasSlip = r.SlipSha256 != null,
         PaymentReference = r.PaymentReference,

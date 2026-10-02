@@ -40,6 +40,7 @@ public static class BusinessServiceExtensions
         services.AddScoped<IDeviceCommandService, DeviceCommandService>();
         services.AddScoped<IDeviceHealthService, DeviceHealthService>();
         services.AddScoped<IRenewalService, RenewalService>();
+        services.AddScoped<IRenewalPackageService, RenewalPackageService>();
         // Singleton -- must persist across requests to actually cache
         // anything. See IArchivedTripCache for correctness reasoning.
         services.AddSingleton<IArchivedTripCache, ArchivedTripCache>(); // NEW

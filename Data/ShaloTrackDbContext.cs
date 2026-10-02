@@ -36,6 +36,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<SubscriptionReminderLog> SubscriptionReminderLogs => Set<SubscriptionReminderLog>();
     public DbSet<RenewalRequest> RenewalRequests => Set<RenewalRequest>();
     public DbSet<RenewalSlip> RenewalSlips => Set<RenewalSlip>();
+    public DbSet<RenewalPackage> RenewalPackages => Set<RenewalPackage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -276,6 +277,16 @@ public class ShaloTrackDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("IX_RenewalRequests_OpenPerVehicle")
                 .HasFilter("\"Status\" IN (0, 1)");
+        });
+
+        modelBuilder.Entity<RenewalPackage>(e =>
+        {
+            e.Property(p => p.Code).HasMaxLength(32);
+            e.Property(p => p.Label).HasMaxLength(40).IsRequired();
+            e.Property(p => p.Positioning).HasMaxLength(120);
+            e.Property(p => p.CustomerPriceLkr).HasPrecision(12, 2);
+            e.Ignore(p => p.IsOffered);
+            e.HasIndex(p => p.Duration).IsUnique();
         });
 
         modelBuilder.Entity<RenewalSlip>(e =>

@@ -12,6 +12,19 @@ public static class RenewalEnumExtensions
         RenewalDuration.OneYear => "1 Year",
         RenewalDuration.TwoYears => "2 Year",
         RenewalDuration.ThreeYears => "3 Year",
+        RenewalDuration.SixYears => "6 Year",
+        _ => throw new ArgumentOutOfRangeException(nameof(d), d, "Unhandled renewal duration.")
+    };
+
+    /// <summary>The package code used by the admin portal's price master (renewal_packages.code).</summary>
+    public static string ToPackageCode(this RenewalDuration d) => d switch
+    {
+        RenewalDuration.ThreeMonths => "THREE_MONTHS",
+        RenewalDuration.SixMonths => "SIX_MONTHS",
+        RenewalDuration.OneYear => "ONE_YEAR",
+        RenewalDuration.TwoYears => "TWO_YEARS",
+        RenewalDuration.ThreeYears => "THREE_YEARS",
+        RenewalDuration.SixYears => "SIX_YEARS",
         _ => throw new ArgumentOutOfRangeException(nameof(d), d, "Unhandled renewal duration.")
     };
 

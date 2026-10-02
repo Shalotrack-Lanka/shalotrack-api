@@ -14,6 +14,8 @@ public class InternalRenewalDto
     public string VehicleNumber { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
+    /// <summary>The package price the customer was shown. Staff compare it with the bank slip before approving.</summary>
+    public decimal? AmountLkr { get; set; }
     public string? PaymentReference { get; set; }
     public string? CustomerNote { get; set; }
     public bool HasSlip { get; set; }
