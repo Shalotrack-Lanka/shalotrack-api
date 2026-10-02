@@ -1,5 +1,7 @@
 ﻿using System.Net;
+using Microsoft.EntityFrameworkCore;
 using ShaloTrack_API.Auth;
+using ShaloTrack_API.Data;
 using ShaloTrack_API.DTOs.Subscription;
 using ShaloTrack_API.Enums;
 using ShaloTrack_API.Models;
@@ -14,12 +16,14 @@ public class SubscriptionService : ISubscriptionService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
     private readonly IPaymentProvider _paymentProvider;
+    private readonly ShaloTrackDbContext _db;
 
-    public SubscriptionService(IUnitOfWork unitOfWork, ICurrentUser currentUser, IPaymentProvider paymentProvider)
+    public SubscriptionService(IUnitOfWork unitOfWork, ICurrentUser currentUser, IPaymentProvider paymentProvider, ShaloTrackDbContext db)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _paymentProvider = paymentProvider;
+        _db = db;
     }
 
     public async Task<ApiResponse<SubscriptionResponseDto>> RequestSubscriptionAsync(CreateSubscriptionDto dto)
@@ -67,7 +71,12 @@ public class SubscriptionService : ISubscriptionService
         // trusted from the client. A request that sent its own price
         // would let anyone claim a 3-year plan at the Free price by just
         // editing the request body.
-        var price = GetPriceForPlan(plan);
+        var (price, priceError) = await ResolvePriceAsync(plan);
+        if (priceError is not null)
+        {
+            return ApiResponse<SubscriptionResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest, "This plan is not available.", priceError);
+        }
 
         var subscription = new Subscription
         {
@@ -167,12 +176,45 @@ public class SubscriptionService : ISubscriptionService
         return ApiResponse<string>.Ok("OK", "Payment confirmed, subscription activated.");
     }
 
-    private static decimal GetPriceForPlan(SubscriptionPlan plan) => plan switch
+    /// <summary>
+    /// The price of an app plan comes from the same price list the admin portal pushes for device
+    /// renewals (ONE_YEAR / TWO_YEARS / THREE_YEARS), so the two can never disagree. If the admin has
+    /// switched a package off or removed its price, the plan cannot be ordered. Only when no price list
+    /// has ever been synced do the Renewal Plans guideline's prices (v1.0, 30 Sep 2026) apply.
+    /// </summary>
+    private async Task<(decimal Price, string? Error)> ResolvePriceAsync(SubscriptionPlan plan)
     {
-        SubscriptionPlan.Free => 0m,
+        if (plan == SubscriptionPlan.Free) return (0m, null);
+
+        var code = plan switch
+        {
+            SubscriptionPlan.OneYear => "ONE_YEAR",
+            SubscriptionPlan.TwoYears => "TWO_YEARS",
+            SubscriptionPlan.ThreeYears => "THREE_YEARS",
+            _ => throw new ArgumentOutOfRangeException(nameof(plan), plan, "Unhandled subscription plan.")
+        };
+
+        var package = await _db.RenewalPackages.AsNoTracking().FirstOrDefaultAsync(p => p.Code == code);
+        if (package is not null)
+        {
+            if (package.IsOffered) return (package.CustomerPriceLkr!.Value, null);
+            return (0m, "This plan is not on offer right now. Choose another one or contact support.");
+        }
+
+        if (await _db.RenewalPackages.AsNoTracking().AnyAsync())
+        {
+            return (0m, "This plan is not on offer right now. Choose another one or contact support.");
+        }
+
+        return (GuidelinePriceFor(plan), null);
+    }
+
+    /// <summary>Renewal Plans guideline v1.0 prices; used only until the first price list arrives from the admin portal.</summary>
+    private static decimal GuidelinePriceFor(SubscriptionPlan plan) => plan switch
+    {
         SubscriptionPlan.OneYear => 2999m,
-        SubscriptionPlan.TwoYears => 5499m,
-        SubscriptionPlan.ThreeYears => 7999m,
+        SubscriptionPlan.TwoYears => 4999m,
+        SubscriptionPlan.ThreeYears => 6999m,
         _ => throw new ArgumentOutOfRangeException(nameof(plan), plan, "Unhandled subscription plan.")
     };
 
