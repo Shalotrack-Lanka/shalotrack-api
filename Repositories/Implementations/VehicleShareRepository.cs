@@ -72,7 +72,11 @@ public class VehicleShareRepository : IVehicleShareRepository
             .Include(s => s.Vehicle)
                 .ThenInclude(v => v.CurrentLocation) // needed to merge into the dashboard with live location data
             .Include(s => s.OwnerCustomer)
-            .Where(s => s.SharedWithCustomerId == sharedWithCustomerId && s.Status == VehicleShareStatus.Accepted)
+            // FIX: a share of a vehicle the owner has since deleted (IsActive = false)
+            // must disappear for the person it was shared with, too.
+            .Where(s => s.SharedWithCustomerId == sharedWithCustomerId
+                        && s.Status == VehicleShareStatus.Accepted
+                        && s.Vehicle.IsActive)
             .OrderByDescending(s => s.RespondedAt)
             .ToListAsync();
     }

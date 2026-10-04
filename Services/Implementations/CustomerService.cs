@@ -253,7 +253,8 @@ public class CustomerService : ICustomerService
             Address = customer.Address,
             ProfileImage = customer.ProfileImage,
             AccountStatus = customer.AccountStatus,
-            VehicleCount = customer.Vehicles.Count
+            // Only active vehicles — deleted ones are soft-deleted (IsActive = false).
+            VehicleCount = customer.Vehicles.Count(v => v.IsActive)
         };
     }
 

@@ -117,8 +117,13 @@ public class CustomerRepository : ICustomerRepository
             {
                 CustomerId = c.CustomerId,
                 CustomerName = c.FullName,
-                VehicleCount = c.Vehicles.Count,
+                // FIX: a deleted vehicle is soft-deleted (IsActive = false). The
+                // "my vehicles" list (VehicleRepository.GetByCustomerAsync) already
+                // hides those, but this query did not, so a vehicle removed from the
+                // Vehicles tab kept showing on the dashboard and in its count.
+                VehicleCount = c.Vehicles.Count(v => v.IsActive),
                 Vehicles = c.Vehicles
+                    .Where(v => v.IsActive)
                     .OrderBy(v => v.VehicleNumber)
                     .Select(v => new DashboardVehicleDto
                     {
