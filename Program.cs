@@ -48,6 +48,7 @@ builder.Services.AddHostedService<RawPacketRetentionWorker>();
 // Pushes 14/7/1-day reminders (and a "ended" notice) to customers. Gated by
 // SubscriptionReminders:DryRun -- defaults to true (fails safe: logs only).
 builder.Services.AddHostedService<SubscriptionReminderWorker>();
+builder.Services.AddHostedService<VehicleReminderWorker>();
 
 // ASP.NET Core
 builder.Services.AddControllers();

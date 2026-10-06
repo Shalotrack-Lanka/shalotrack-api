@@ -24,6 +24,7 @@ public static class RepositoryServiceExtensions
         services.AddScoped<IEmergencyContactRepository, EmergencyContactRepository>();  // NEW
         services.AddScoped<ISetupShalotrackDeviceRepository, SetupShalotrackDeviceRepository>(); // NEW
         services.AddScoped<ISavedPlaceRepository, SavedPlaceRepository>();
+        services.AddScoped<IVehicleReminderRepository, VehicleReminderRepository>();
         services.AddScoped<IVehicleShareRepository, VehicleShareRepository>();
         services.AddScoped<IGeofenceRepository, GeofenceRepository>();
         services.AddScoped<IComplaintRepository, ComplaintRepository>();

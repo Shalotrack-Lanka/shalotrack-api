@@ -25,6 +25,7 @@ public class UnitOfWork : IUnitOfWork
     public IVehicleShareRepository VehicleShares { get; }
     public IGeofenceRepository Geofences { get; }
     public IComplaintRepository Complaints { get; } // NEW
+    public IVehicleReminderRepository VehicleReminders { get; }
 
     public UnitOfWork(
         ShaloTrackDbContext context,
@@ -41,7 +42,8 @@ public class UnitOfWork : IUnitOfWork
         ISavedPlaceRepository savedPlaces,
         IVehicleShareRepository vehicleShares, // NEW
         IGeofenceRepository geofences, // NEW
-        IComplaintRepository complaints) // NEW
+        IComplaintRepository complaints, // NEW
+        IVehicleReminderRepository vehicleReminders)
     {
         _context = context;
         Customers = customerRepository;
@@ -58,6 +60,7 @@ public class UnitOfWork : IUnitOfWork
         VehicleShares = vehicleShares;
         Geofences = geofences;
         Complaints = complaints; // NEW
+        VehicleReminders = vehicleReminders;
     }
 
     public async Task<int> SaveChangesAsync()

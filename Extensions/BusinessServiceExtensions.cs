@@ -11,6 +11,8 @@ public static class BusinessServiceExtensions
     {
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<ISubscriptionReminderService, SubscriptionReminderService>();
+        services.AddScoped<IVehicleReminderService, VehicleReminderService>();
+        services.AddScoped<IVehicleReminderNotifier, VehicleReminderNotifier>();
         services.AddScoped<IVehicleService, VehicleService>();
         services.AddScoped<IGpsDeviceService, GpsDeviceService>();
         services.AddScoped<IDeviceAssignmentService, DeviceAssignmentService>();

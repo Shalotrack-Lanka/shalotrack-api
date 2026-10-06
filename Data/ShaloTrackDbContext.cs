@@ -34,6 +34,8 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<ComplaintReply> ComplaintReplies => Set<ComplaintReply>();
     public DbSet<DeviceSubscriptionStatus> DeviceSubscriptionStatuses => Set<DeviceSubscriptionStatus>();
     public DbSet<SubscriptionReminderLog> SubscriptionReminderLogs => Set<SubscriptionReminderLog>();
+    public DbSet<VehicleReminder> VehicleReminders => Set<VehicleReminder>();
+    public DbSet<VehicleReminderNotice> VehicleReminderNotices => Set<VehicleReminderNotice>();
     public DbSet<RenewalRequest> RenewalRequests => Set<RenewalRequest>();
     public DbSet<RenewalSlip> RenewalSlips => Set<RenewalSlip>();
     public DbSet<RenewalPackage> RenewalPackages => Set<RenewalPackage>();
@@ -253,6 +255,23 @@ public class ShaloTrackDbContext : DbContext
         modelBuilder.Entity<SubscriptionReminderLog>()
             .HasIndex(l => new { l.ImeiNumber, l.Milestone, l.ExpiresAt })
             .IsUnique();
+
+        // ---- Vehicle reminders (licence / insurance / service) ----
+        // One reminder per (vehicle, type). Cascade: if a vehicle row is ever hard-deleted its
+        // reminders go with it (vehicles are soft-deleted in practice).
+        modelBuilder.Entity<VehicleReminder>(e =>
+        {
+            e.Property(r => r.Notes).HasMaxLength(200);
+            e.HasIndex(r => new { r.VehicleId, r.Type }).IsUnique();
+            e.HasOne(r => r.Vehicle).WithMany().HasForeignKey(r => r.VehicleId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Dedupe guard for the push: one notice per (reminder, threshold, due date).
+        modelBuilder.Entity<VehicleReminderNotice>(e =>
+        {
+            e.HasIndex(n => new { n.ReminderId, n.Threshold, n.DueDate }).IsUnique();
+            e.HasOne<VehicleReminder>().WithMany().HasForeignKey(n => n.ReminderId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         // ---- Customer device renewals ----
         modelBuilder.Entity<RenewalRequest>(e =>
