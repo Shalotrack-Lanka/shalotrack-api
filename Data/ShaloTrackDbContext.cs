@@ -48,6 +48,12 @@ public class ShaloTrackDbContext : DbContext
             .HasIndex(c => c.FirebaseUid)
             .IsUnique();
 
+        // Existing customers must get the weekly summary ON when the column is added. Without
+        // HasDefaultValue(true) EF would emit DEFAULT false for the non-nullable bool.
+        modelBuilder.Entity<Customer>()
+            .Property(c => c.WeeklySummaryEnabled)
+            .HasDefaultValue(true);
+
         modelBuilder.Entity<CurrentLocation>()
             .HasKey(c => c.DeviceId);
 

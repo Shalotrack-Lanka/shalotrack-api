@@ -49,6 +49,7 @@ builder.Services.AddHostedService<RawPacketRetentionWorker>();
 // SubscriptionReminders:DryRun -- defaults to true (fails safe: logs only).
 builder.Services.AddHostedService<SubscriptionReminderWorker>();
 builder.Services.AddHostedService<VehicleReminderWorker>();
+builder.Services.AddHostedService<WeeklySummaryWorker>();
 
 // ASP.NET Core
 builder.Services.AddControllers();

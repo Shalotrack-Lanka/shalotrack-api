@@ -193,6 +193,19 @@ public class GpsTrackingService : IGpsTrackingService
             "Trips summary retrieved successfully.");
     }
 
+    public async Task<TripsReportResponseDto?> GetTripsReportForSystemAsync(Guid vehicleId, DateTime from, DateTime to)
+    {
+        if (vehicleId == Guid.Empty || to <= from || (to - from).TotalDays > MaxTripReportDays)
+            return null;
+
+        // Same lapsed-subscription rule as the user-facing path: no trip data for a lapsed vehicle.
+        if (await _subscriptionGate.IsRenewalRequiredAsync(vehicleId))
+            return null;
+
+        var merged = await GetMergedPointsAsync(vehicleId, from, to);
+        return ComputeTripsReport(vehicleId, from, to, merged.Points);
+    }
+
     private sealed record MergedTrackingResult(
         List<TrackingPointRaw> Points,
         Guid? DeviceId,

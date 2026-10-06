@@ -14,6 +14,8 @@ public static class BusinessServiceExtensions
         services.AddScoped<ISubscriptionReminderService, SubscriptionReminderService>();
         services.AddScoped<IVehicleReminderService, VehicleReminderService>();
         services.AddScoped<IVehicleAlertSettingsService, VehicleAlertSettingsService>();
+        services.AddScoped<IWeeklySummarySettingsService, WeeklySummarySettingsService>();
+        services.AddScoped<IWeeklySummaryNotifier, WeeklySummaryNotifier>();
         // Singleton: the live alert listener (itself a singleton) reads thresholds through it.
         services.AddSingleton<IVehicleAlertSettingsProvider, VehicleAlertSettingsProvider>();
         services.AddScoped<IVehicleReminderNotifier, VehicleReminderNotifier>();

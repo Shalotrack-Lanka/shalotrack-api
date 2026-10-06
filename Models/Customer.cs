@@ -19,6 +19,14 @@ public class Customer
     public string? Address { get; set; }
     public string? ProfileImage { get; set; }
     public CustomerStatus AccountStatus { get; set; }
+
+    // NEW -- weekly summary push. On by default (existing rows too: the column is added with
+    // DEFAULT true, see ShaloTrackDbContext). LastWeeklySummaryFor is the Monday of the last week
+    // a summary was handled for; it is claimed atomically before sending, so a restart or a
+    // second instance can never send the same week twice. No separate log table is needed.
+    public bool WeeklySummaryEnabled { get; set; } = true;
+    public DateOnly? LastWeeklySummaryFor { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public ICollection<Vehicle> Vehicles { get; set; } = new List<Vehicle>();
