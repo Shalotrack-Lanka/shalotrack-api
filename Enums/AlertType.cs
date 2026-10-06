@@ -13,5 +13,7 @@ public enum AlertType
          // raw integers; inserting SOS anywhere but the end would silently
          // reassign what every existing stored value means.
     GeofenceEnter, // NEW -- same rule applies: appended at the end (=7),
-    GeofenceExit   // (=8), never inserted earlier in the list.
+    GeofenceExit,  // (=8), never inserted earlier in the list.
+    Idle           // NEW -- (=9) appended at the end, same rule: engine on and not moving
+                   // for the vehicle's configured number of minutes.
 }

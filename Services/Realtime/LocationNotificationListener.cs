@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using ShaloTrack_API.Constants;
 using ShaloTrack_API.Enums;
 using ShaloTrack_API.Hubs;
 using ShaloTrack_API.Models;
@@ -71,9 +72,12 @@ public class LocationNotificationListener : BackgroundService
     private readonly IHubContext<LocationHub> _hubContext;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ITripCloseEventQueue _tripCloseEventQueue; // NEW -- Phase 3b
+    private readonly IVehicleAlertSettingsProvider _alertSettings; // NEW -- per-vehicle speed/idle thresholds
     private readonly ILogger<LocationNotificationListener> _logger;
 
-    private const decimal OverspeedThresholdKmh = 80m;
+    // The overspeed limit is no longer a constant: it is per vehicle (Vehicles.SpeedLimitKmh,
+    // default AlertDefaults.SpeedLimitKmh = 80, the value used before), read through the
+    // cached IVehicleAlertSettingsProvider so the GPS hot path never queries per ping.
     private const int LowBatteryThresholdPercent = 20;
 
     private readonly ConcurrentDictionary<Guid, DeviceAlertState> _deviceStates = new();
@@ -83,6 +87,7 @@ public class LocationNotificationListener : BackgroundService
         IHubContext<LocationHub> hubContext,
         IServiceScopeFactory scopeFactory,
         ITripCloseEventQueue tripCloseEventQueue, // NEW
+        IVehicleAlertSettingsProvider alertSettings, // NEW
         ILogger<LocationNotificationListener> logger)
     {
         _connectionString = configuration.GetConnectionString("RealtimeConnection")
@@ -92,6 +97,7 @@ public class LocationNotificationListener : BackgroundService
         _hubContext = hubContext;
         _scopeFactory = scopeFactory;
         _tripCloseEventQueue = tripCloseEventQueue; // NEW
+        _alertSettings = alertSettings; // NEW
         _logger = logger;
     }
 
@@ -243,6 +249,9 @@ public class LocationNotificationListener : BackgroundService
         var deviceId = data.DeviceId!.Value;
         var state = _deviceStates.GetOrAdd(deviceId, _ => new DeviceAlertState());
 
+        // Resolved BEFORE taking the lock (it may await). Cached for 60 s per vehicle.
+        var settings = await _alertSettings.GetAsync(data.VehicleId!.Value);
+
         var alertsToCreate = new List<Alert>();
         var tripJustClosed = false; // NEW
         DateTime? tripCloseEventTime = null; // NEW -- same instant as the closing IgnitionOff alert's TriggeredAt
@@ -274,15 +283,41 @@ public class LocationNotificationListener : BackgroundService
             }
             state.IgnitionStatus = data.IgnitionStatus;
 
-            bool isSpeeding = data.Speed > OverspeedThresholdKmh;
+            bool isSpeeding = data.Speed > settings.SpeedLimitKmh;
             if (isSpeeding && !state.IsSpeeding)
             {
                 alertsToCreate.Add(BuildAlert(
                     data.VehicleId!.Value, data.DeviceId, data.Latitude, data.Longitude,
                     AlertType.Overspeed,
-                    $"Speed exceeded {OverspeedThresholdKmh} km/h (reached {data.Speed:F0} km/h)"));
+                    $"Speed exceeded {settings.SpeedLimitKmh} km/h (reached {data.Speed:F0} km/h)"));
             }
             state.IsSpeeding = isSpeeding;
+
+            // ---- Idle: engine on and not moving for the owner's configured minutes ----
+            // One alert per idle episode (re-armed once the vehicle moves or the engine goes off),
+            // same transition pattern as Overspeed. Off unless the owner set IdleAlertMinutes.
+            // In-memory only: a restart restarts the idle clock, so at worst an alert is late,
+            // never duplicated. It also needs the tracker to keep reporting while parked.
+            bool isIdle = data.IgnitionStatus && data.Speed <= AlertDefaults.IdleSpeedKmh;
+            if (!isIdle || settings.IdleMinutes is null)
+            {
+                state.IdleSinceUtc = null;
+                state.IdleAlerted = false;
+            }
+            else
+            {
+                var nowUtc = DateTime.UtcNow;
+                state.IdleSinceUtc ??= nowUtc;
+
+                if (!state.IdleAlerted && nowUtc - state.IdleSinceUtc.Value >= TimeSpan.FromMinutes(settings.IdleMinutes.Value))
+                {
+                    state.IdleAlerted = true;
+                    alertsToCreate.Add(BuildAlert(
+                        data.VehicleId!.Value, data.DeviceId, data.Latitude, data.Longitude,
+                        AlertType.Idle,
+                        $"Idling for {settings.IdleMinutes.Value} minutes with the engine on"));
+                }
+            }
         }
 
         // Persist BEFORE enqueueing. TripArchivalQueueWorker picks this event
@@ -673,6 +708,12 @@ public class LocationNotificationListener : BackgroundService
     {
         public bool? IgnitionStatus { get; set; }
         public bool IsSpeeding { get; set; }
+
+        // NEW -- idle detection (see CheckLocationAlertsAsync): when the current idle episode
+        // started, and whether its single alert has already been raised.
+        public DateTime? IdleSinceUtc { get; set; }
+        public bool IdleAlerted { get; set; }
+
         public bool? PowerStatus { get; set; }
         public bool IsLowBattery { get; set; }
 

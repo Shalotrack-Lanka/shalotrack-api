@@ -1,6 +1,7 @@
 ﻿using ShaloTrack_API.Auth;
 using ShaloTrack_API.Services.Implementations;
 using ShaloTrack_API.Services.Interfaces;
+using ShaloTrack_API.Services.Realtime;
 
 namespace ShaloTrack_API.Extensions;
 
@@ -12,6 +13,9 @@ public static class BusinessServiceExtensions
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<ISubscriptionReminderService, SubscriptionReminderService>();
         services.AddScoped<IVehicleReminderService, VehicleReminderService>();
+        services.AddScoped<IVehicleAlertSettingsService, VehicleAlertSettingsService>();
+        // Singleton: the live alert listener (itself a singleton) reads thresholds through it.
+        services.AddSingleton<IVehicleAlertSettingsProvider, VehicleAlertSettingsProvider>();
         services.AddScoped<IVehicleReminderNotifier, VehicleReminderNotifier>();
         services.AddScoped<IVehicleService, VehicleService>();
         services.AddScoped<IGpsDeviceService, GpsDeviceService>();

@@ -32,6 +32,13 @@ public class Vehicle
     // vehicle, including whoever the recorded owner happens to be.
     public bool IsDemoVehicle { get; set; } = false;
 
+    // NEW -- per-vehicle alert thresholds, set by the owner. NULL means "use the default":
+    // SpeedLimitKmh null = AlertDefaults.SpeedLimitKmh (80, what every vehicle used before);
+    // IdleAlertMinutes null = idle alerts are OFF (opt-in, so deploying never creates new
+    // notifications for existing customers). See AlertDefaults for the allowed ranges.
+    public int? SpeedLimitKmh { get; set; }
+    public int? IdleAlertMinutes { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public Customer Customer { get; set; } = null!;
