@@ -8,6 +8,9 @@ public interface ICurrentUser
     bool IsAuthenticated { get; }
     bool IsStaff { get; }
     bool IsEmailVerified { get; }
+
+    /// <summary>When the user last signed in (Firebase auth_time claim); null if absent. Used to require a recent sign-in for destructive actions.</summary>
+    DateTime? AuthTimeUtc { get; }
 }
 
 public class CurrentUser : ICurrentUser
@@ -48,6 +51,17 @@ public class CurrentUser : ICurrentUser
             var user = _http.HttpContext?.User;
             var raw = user?.FindFirstValue("email_verified");
             return bool.TryParse(raw, out var verified) && verified;
+        }
+    }
+
+    public DateTime? AuthTimeUtc
+    {
+        get
+        {
+            var raw = _http.HttpContext?.User?.FindFirstValue("auth_time");
+            return long.TryParse(raw, out var seconds)
+                ? DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime
+                : null;
         }
     }
 

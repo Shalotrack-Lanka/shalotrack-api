@@ -36,6 +36,7 @@ public static class RateLimitingExtensions
         public const string SignalRHub = "signalr_hub";
         public const string PublicLive = "public_live";
         public const string AccountExport = "account_export";
+        public const string AccountDelete = "account_delete";
     }
 
     public static IServiceCollection AddShaloTrackRateLimiting(
@@ -134,6 +135,23 @@ public static class RateLimitingExtensions
                     new FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 3,
+                        Window = TimeSpan.FromHours(1),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
+            });
+
+            // Deleting / cancelling an account is rare and serious: 5 per hour per account.
+            options.AddPolicy(Policies.AccountDelete, httpContext =>
+            {
+                var uid = httpContext.User?.FindFirst("sub")?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "anonymous";
+
+                return RateLimitPartition.GetFixedWindowLimiter("acct-delete:" + uid, _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 5,
                         Window = TimeSpan.FromHours(1),
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                         QueueLimit = 0

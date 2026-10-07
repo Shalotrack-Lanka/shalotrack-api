@@ -27,6 +27,12 @@ public class Customer
     public bool WeeklySummaryEnabled { get; set; } = true;
     public DateOnly? LastWeeklySummaryFor { get; set; }
 
+    // Account deletion (PDPA). DeletionRequestedAt set = the account is locked and will be erased 30
+    // days later unless cancelled (set back to null). DeletedAt set = erased: the row stays only as an
+    // anonymised shell so payment history and complaint records keep their references.
+    public DateTime? DeletionRequestedAt { get; set; }
+    public DateTime? DeletedAt { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public ICollection<Vehicle> Vehicles { get; set; } = new List<Vehicle>();

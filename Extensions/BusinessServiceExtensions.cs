@@ -18,6 +18,11 @@ public static class BusinessServiceExtensions
         services.AddScoped<IWeeklySummaryNotifier, WeeklySummaryNotifier>();
         services.AddScoped<ILiveShareService, LiveShareService>();
         services.AddScoped<IAccountDataService, AccountDataService>();
+        services.AddScoped<IAccountDeletionService, AccountDeletionService>();
+        services.AddScoped<IAccountPurgeService, AccountPurgeService>();
+        services.AddScoped<IAccountLockCache, AccountLockCache>();
+        services.AddSingleton<IFirebaseUserAdmin, FirebaseUserAdmin>();
+        services.AddMemoryCache();
         // Singleton: the live alert listener (itself a singleton) reads thresholds through it.
         services.AddSingleton<IVehicleAlertSettingsProvider, VehicleAlertSettingsProvider>();
         services.AddScoped<IVehicleReminderNotifier, VehicleReminderNotifier>();

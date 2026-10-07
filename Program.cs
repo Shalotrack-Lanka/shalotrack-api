@@ -51,6 +51,11 @@ builder.Services.AddHostedService<SubscriptionReminderWorker>();
 builder.Services.AddHostedService<VehicleReminderWorker>();
 builder.Services.AddHostedService<WeeklySummaryWorker>();
 
+// ---- ACCOUNT DELETION PURGE (PDPA) ----
+// Erases accounts 30 days after the customer asked. Gated by AccountDeletion:DryRun --
+// defaults to true (fails safe: logs what it would erase, changes nothing).
+builder.Services.AddHostedService<AccountPurgeWorker>();
+
 // ASP.NET Core
 builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();
@@ -147,6 +152,17 @@ FirebaseApp.Create(new AppOptions
                                   .ToGoogleCredential()
                                   .CreateScoped("https://www.googleapis.com/auth/firebase.messaging")
 });
+
+// SECOND Firebase app, used only for account deletion (revoke sign-ins, delete the Firebase user).
+// The default app above is scoped to firebase.messaging, which Firebase refuses for user management,
+// so this one carries the broader scope. Same service account; named so it cannot be mistaken for
+// the push app.
+FirebaseApp.Create(new AppOptions
+{
+    Credential = CredentialFactory.FromJson<ServiceAccountCredential>(firebaseServiceAccountJson)
+                                  .ToGoogleCredential()
+                                  .CreateScoped("https://www.googleapis.com/auth/cloud-platform")
+}, FirebaseUserAdmin.AppName);
 
 builder.Services.AddScoped<IPushNotificationService, PushNotificationService>();
 
@@ -292,6 +308,9 @@ app.UseCors("CustomerPortal");
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// While an account waits for deletion, only api/Account/* works for that customer.
+app.UseMiddleware<AccountDeletionLockMiddleware>();
 
 // Health check must never be rate-limited -- ALB and monitoring hit this
 // constantly. DisableRateLimiting() exempts it from the global policy.
