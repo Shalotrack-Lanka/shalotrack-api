@@ -27,7 +27,10 @@ public class GpsTrackingRepository : IGpsTrackingRepository
             query = query.Where(x =>
                 x.Device.DeviceAssignments.Any(a =>
                     a.VehicleId == filter.VehicleId.Value &&
-                    (a.Status == Enums.AssignmentStatus.Active ||
+                    // PRIVACY: a device's data belongs to a vehicle only from the moment it was bound to it.
+                    // Without this lower bound, whoever binds a used device would see the previous
+                    // owner's whole history.
+                    ((a.Status == Enums.AssignmentStatus.Active && x.EventTime >= a.AssignedAt) ||
                      // a device this vehicle used before a replacement: only while it was assigned
                      (a.Status == Enums.AssignmentStatus.Removed &&
                       a.RemovedAt != null &&
@@ -60,7 +63,8 @@ public class GpsTrackingRepository : IGpsTrackingRepository
             ? query.Where(x => x.Device.DeviceAssignments.Any(a => a.VehicleId == vehicleId))
             : query.Where(x => x.Device.DeviceAssignments.Any(a =>
                   a.VehicleId == vehicleId &&
-                  (a.Status == Enums.AssignmentStatus.Active ||
+                  // PRIVACY: only from the moment the device was bound to this vehicle (see GetAsync).
+                  ((a.Status == Enums.AssignmentStatus.Active && x.EventTime >= a.AssignedAt) ||
                    // a device this vehicle used before a replacement: only while it was assigned
                    (a.Status == Enums.AssignmentStatus.Removed &&
                     a.RemovedAt != null &&

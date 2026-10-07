@@ -60,6 +60,11 @@ public class LiveShareLinkRepository : ILiveShareLinkRepository
         return await _context.CurrentLocations
             .AsNoTracking()
             .Where(c => c.VehicleId == vehicleId)
+            // PRIVACY: never a position from before the device was bound to this vehicle.
+            .Where(c => c.Device.DeviceAssignments.Any(a =>
+                a.VehicleId == vehicleId &&
+                a.Status == Enums.AssignmentStatus.Active &&
+                c.LastUpdate >= a.AssignedAt))
             .OrderByDescending(c => c.LastUpdate)
             .FirstOrDefaultAsync();
     }

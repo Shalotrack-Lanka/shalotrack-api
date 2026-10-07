@@ -57,8 +57,9 @@ public class GpsDeviceRepository : IGpsDeviceRepository
         // detection. Never exposed to the client directly; only the computed summary is.
         return await _context.GpsTrackings
             .AsNoTracking()
+            // PRIVACY: only data recorded after the device was bound to this vehicle.
             .Where(x => x.Device.DeviceAssignments.Any(a =>
-                a.VehicleId == vehicleId && a.Status == Enums.AssignmentStatus.Active))
+                a.VehicleId == vehicleId && a.Status == Enums.AssignmentStatus.Active && x.EventTime >= a.AssignedAt))
             .Where(x => x.EventTime >= from && x.EventTime <= to)
             .OrderBy(x => x.EventTime)
             .Select(x => new TrackingPointRaw

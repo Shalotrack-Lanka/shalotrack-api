@@ -272,7 +272,15 @@ public class GpsTrackingService : IGpsTrackingService
             // shows outside the time it belonged to this vehicle).
             var s3Targets = new List<(Guid DeviceId, DateTime From, DateTime To)>();
             if (resolvedDeviceId.HasValue)
-                s3Targets.Add((resolvedDeviceId.Value, from, to));
+            {
+                // PRIVACY: archived points of the current device only from the moment it was bound
+                // to this vehicle (the demo vehicle keeps its full history by design).
+                var activeFrom = (!isDemo && activeAssignment is not null && activeAssignment.AssignedAt > from)
+                    ? activeAssignment.AssignedAt
+                    : from;
+                if (activeFrom < to)
+                    s3Targets.Add((resolvedDeviceId.Value, activeFrom, to));
+            }
 
             if (!isDemo && vehicle?.DeviceAssignments is not null)
             {
