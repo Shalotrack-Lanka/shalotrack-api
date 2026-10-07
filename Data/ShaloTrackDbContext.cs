@@ -36,6 +36,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<SubscriptionReminderLog> SubscriptionReminderLogs => Set<SubscriptionReminderLog>();
     public DbSet<VehicleReminder> VehicleReminders => Set<VehicleReminder>();
     public DbSet<VehicleReminderNotice> VehicleReminderNotices => Set<VehicleReminderNotice>();
+    public DbSet<LiveShareLink> LiveShareLinks => Set<LiveShareLink>();
     public DbSet<RenewalRequest> RenewalRequests => Set<RenewalRequest>();
     public DbSet<RenewalSlip> RenewalSlips => Set<RenewalSlip>();
     public DbSet<RenewalPackage> RenewalPackages => Set<RenewalPackage>();
@@ -277,6 +278,18 @@ public class ShaloTrackDbContext : DbContext
         {
             e.HasIndex(n => new { n.ReminderId, n.Threshold, n.DueDate }).IsUnique();
             e.HasOne<VehicleReminder>().WithMany().HasForeignKey(n => n.ReminderId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Temporary live-share links ----
+        // Only the SHA-256 hex of the token is stored; the hash is unique and is the lookup key for the
+        // public page. (VehicleId, ExpiresAt) serves "active links for this vehicle".
+        modelBuilder.Entity<LiveShareLink>(e =>
+        {
+            e.Property(l => l.TokenHash).HasMaxLength(64).IsRequired();
+            e.HasIndex(l => l.TokenHash).IsUnique();
+            e.HasIndex(l => new { l.VehicleId, l.ExpiresAt });
+            e.HasOne<Vehicle>().WithMany().HasForeignKey(l => l.VehicleId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Customer>().WithMany().HasForeignKey(l => l.CustomerId).OnDelete(DeleteBehavior.Cascade);
         });
 
         // ---- Customer device renewals ----

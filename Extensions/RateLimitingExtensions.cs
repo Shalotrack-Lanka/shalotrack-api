@@ -34,6 +34,7 @@ public static class RateLimitingExtensions
         public const string GeneralApi = "general_api";
         public const string AuthSensitive = "auth_sensitive";
         public const string SignalRHub = "signalr_hub";
+        public const string PublicLive = "public_live";
     }
 
     public static IServiceCollection AddShaloTrackRateLimiting(
@@ -96,6 +97,25 @@ public static class RateLimitingExtensions
                     new FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 20,
+                        Window = TimeSpan.FromSeconds(60),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
+            });
+
+            // Public live-share page: 30 req / 60 s PER LINK (the page polls about every 10 s, i.e. 6/min).
+            // Partitioned by the token in the path, not by IP: every viewer reaches the API through the
+            // Fleet server, so an IP partition would put all viewers in one bucket. Malformed tokens share
+            // one bucket so garbage cannot create unlimited partitions.
+            options.AddPolicy(Policies.PublicLive, httpContext =>
+            {
+                var token = httpContext.Request.RouteValues["token"] as string;
+                var key = token is { Length: 43 } ? token : "malformed";
+
+                return RateLimitPartition.GetFixedWindowLimiter(key, _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 30,
                         Window = TimeSpan.FromSeconds(60),
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                         QueueLimit = 0
