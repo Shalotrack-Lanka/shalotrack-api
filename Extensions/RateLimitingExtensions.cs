@@ -35,6 +35,7 @@ public static class RateLimitingExtensions
         public const string AuthSensitive = "auth_sensitive";
         public const string SignalRHub = "signalr_hub";
         public const string PublicLive = "public_live";
+        public const string AccountExport = "account_export";
     }
 
     public static IServiceCollection AddShaloTrackRateLimiting(
@@ -117,6 +118,23 @@ public static class RateLimitingExtensions
                     {
                         PermitLimit = 30,
                         Window = TimeSpan.FromSeconds(60),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
+            });
+
+            // Data export is heavy (about 15 queries) and rarely needed: 3 per hour per account.
+            options.AddPolicy(Policies.AccountExport, httpContext =>
+            {
+                var uid = httpContext.User?.FindFirst("sub")?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "anonymous";
+
+                return RateLimitPartition.GetFixedWindowLimiter("export:" + uid, _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 3,
+                        Window = TimeSpan.FromHours(1),
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                         QueueLimit = 0
                     });
