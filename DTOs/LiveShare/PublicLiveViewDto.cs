@@ -8,6 +8,10 @@
 public class PublicLiveViewDto
 {
     public string PlateNumber { get; set; } = string.Empty;
+
+    /// <summary>Car, SUV, Van, Truck, Motorcycle, Three-Wheeler ... Only used to pick the map icon.
+    /// Not sensitive (visible on the car itself), unlike make/model which stay private.</summary>
+    public string? VehicleType { get; set; }
     public DateTime ExpiresAt { get; set; }
     public DateTime ServerTime { get; set; }
     public PublicLivePositionDto Position { get; set; } = new();

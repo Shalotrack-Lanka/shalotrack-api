@@ -169,6 +169,7 @@ public class LiveShareService : ILiveShareService
         var view = new PublicLiveViewDto
         {
             PlateNumber = vehicle.VehicleNumber,
+            VehicleType = vehicle.VehicleType,
             ExpiresAt = link.ExpiresAt,
             ServerTime = now,
             Position = new PublicLivePositionDto

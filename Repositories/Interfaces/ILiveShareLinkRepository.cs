@@ -2,7 +2,7 @@
 
 namespace ShaloTrack_API.Repositories.Interfaces;
 
-public sealed record PublicVehicleInfo(string VehicleNumber, bool IsActive, bool IsDemoVehicle);
+public sealed record PublicVehicleInfo(string VehicleNumber, bool IsActive, bool IsDemoVehicle, string? VehicleType = null);
 
 public sealed record TrailRow(decimal Latitude, decimal Longitude, DateTime EventTime);
 
