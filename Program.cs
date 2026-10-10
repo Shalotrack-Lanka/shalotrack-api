@@ -7,11 +7,6 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
-using OpenTelemetry.Exporter;
-using OpenTelemetry.Logs;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.Extensions;
 using ShaloTrack_API.Hubs;
@@ -203,42 +198,6 @@ builder.Services.AddHttpClient("AdminPortal", client =>
 {
     client.BaseAddress = new Uri(builder.Configuration["AdminPortal:BaseUrl"]!);
     client.Timeout = TimeSpan.FromSeconds(8);
-});
-
-// ---- OBSERVABILITY (OTel -> SRE stack) ----
-var otelBase = "http://otel.shalotrack.internal:4318";
-
-builder.Services.AddOpenTelemetry()
-    .ConfigureResource(resource => resource.AddService(serviceName: "shalotrack-api"))
-    .WithTracing(tracing => tracing
-        .AddAspNetCoreInstrumentation(options =>
-        {
-            options.Filter = httpContext => httpContext.Request.Path != "/health";
-        })
-        .AddHttpClientInstrumentation()
-        .AddEntityFrameworkCoreInstrumentation()
-        .AddOtlpExporter(otlp =>
-        {
-            otlp.Endpoint = new Uri($"{otelBase}/v1/traces");
-            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-        }))
-    .WithMetrics(metrics => metrics
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddRuntimeInstrumentation()
-        .AddOtlpExporter(otlp =>
-        {
-            otlp.Endpoint = new Uri($"{otelBase}/v1/metrics");
-            otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-        }));
-
-builder.Logging.AddOpenTelemetry(logging =>
-{
-    logging.AddOtlpExporter(otlp =>
-    {
-        otlp.Endpoint = new Uri($"{otelBase}/v1/logs");
-        otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
-    });
 });
 
 var app = builder.Build();
