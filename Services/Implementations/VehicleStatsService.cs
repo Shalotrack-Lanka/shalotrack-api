@@ -171,7 +171,13 @@ public class VehicleStatsService : IVehicleStatsService
                 fromLocal = todayLocalStart.AddDays(-29);
                 break;
             case "all":
-                fromLocal = vehicleCreatedAt + SriLankaOffset;
+                // "All time" is capped to the trip-report window (MaxReportRangeDays). Asking for
+                // more makes GetTripsSummaryAsync reject the request with 400 "Date range too large",
+                // which the clients showed as a generic load failure. Window: 90 local days incl. today
+                // (today 00:00 minus 89 days -> now is < 90 days), never earlier than vehicle creation.
+                var vehicleStartLocal = vehicleCreatedAt + SriLankaOffset;
+                var windowStartLocal = todayLocalStart.AddDays(-(MaxReportRangeDays - 1));
+                fromLocal = vehicleStartLocal > windowStartLocal ? vehicleStartLocal : windowStartLocal;
                 break;
             case "today":
             default:
