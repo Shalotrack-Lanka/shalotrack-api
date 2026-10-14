@@ -354,7 +354,10 @@ public class GpsTrackingService : IGpsTrackingService
             {
                 var listRequest = new ListObjectsV2Request { BucketName = _bucketName, Prefix = prefix };
                 var listResponse = await _s3Client.ListObjectsV2Async(listRequest);
-                objects = listResponse.S3Objects;
+                // AWSSDK.S3 v4 returns null (not an empty list) when nothing matches the prefix.
+                // Without this, any month with no archive crashes the whole request with a
+                // NullReferenceException (seen on the demo vehicle with a long period).
+                objects = listResponse.S3Objects ?? new List<S3Object>();
             }
             catch (Exception ex)
             {
