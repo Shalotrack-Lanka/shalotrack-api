@@ -7,5 +7,5 @@ public class GpsTrackingFilter
     public DateTime? From { get; set; }
     public DateTime? To { get; set; }
     public int Page { get; set; } = 1;
-    public int PageSize { get; set; } = 100;
+    public int PageSize { get; set; } = 2000;
 }
