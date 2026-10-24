@@ -90,6 +90,9 @@ public class CustomerService : ICustomerService
 
     public async Task<ApiResponse<CustomerResponseDto>> CreateAsync(CreateCustomerDto dto)
     {
+        // One canonical form so "861234567v", "861234567V" and " 861234567V " cannot register as three customers.
+        dto.NicNumber = (dto.NicNumber ?? string.Empty).Trim().ToUpperInvariant();
+
         // Business validation
         var uid = _currentUser.FirebaseUid;
         if (string.IsNullOrEmpty(uid))

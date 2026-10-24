@@ -79,7 +79,8 @@ public class CustomerRepository : ICustomerRepository
     public async Task<Customer?> GetByNicAsync(string nicNumber)
     {
         return await _context.Customers
-            .FirstOrDefaultAsync(c => c.NicNumber == nicNumber);
+            // Case-insensitive: rows saved before NIC normalisation may hold a lower-case "v".
+            .FirstOrDefaultAsync(c => c.NicNumber.ToUpper() == nicNumber.ToUpper());
     }
 
     public async Task<bool> ExistsAsync(Guid customerId)

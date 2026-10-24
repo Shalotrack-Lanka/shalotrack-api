@@ -1,20 +1,26 @@
-﻿namespace ShaloTrack_API.DTOs.Geofence;
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace ShaloTrack_API.DTOs.Geofence;
 
 public class CreateGeofenceDto
 {
-    // Null applies this geofence to every one of the customer's vehicles;
-    // set to a specific vehicle to scope it to just that one.
     public Guid? VehicleId { get; set; }
 
+    [Required]
+    [MaxLength(100)]
     public string Name { get; set; } = string.Empty;
+
+    [Range(typeof(decimal), "-90", "90")]
     public decimal Latitude { get; set; }
+
+    [Range(typeof(decimal), "-180", "180")]
     public decimal Longitude { get; set; }
+
+    // Upper cap only (Fleet allows up to 50 km, Android up to 5 km). The lower bound stays at 1 so geofences
+    // created before these limits can still be edited; GeofenceService already rejects 0 and below.
+    [Range(1, 50000)]
     public int RadiusMeters { get; set; }
 
-    // Both default to true (per direct confirmation) if the client omits
-    // them entirely -- handled in the service, not here, since a DTO
-    // property's own C# default (false for bool) would silently override
-    // that intended default the moment the DTO gets bound at all.
     public bool? AlertOnEnter { get; set; }
     public bool? AlertOnExit { get; set; }
 }

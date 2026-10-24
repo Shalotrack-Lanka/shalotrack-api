@@ -8,5 +8,6 @@ public class InviteVehicleShareDto
     public Guid VehicleId { get; set; }
 
     [Required]
+    [MaxLength(25)]
     public string PhoneNumber { get; set; } = string.Empty;
 }
