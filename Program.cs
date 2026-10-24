@@ -175,9 +175,24 @@ builder.Services.AddHttpClient("GoogleRoadsApi", client =>
 // ---- GATEWAY COMMAND API ----
 // Internal VPC HTTP client for forwarding device commands to the Python gateway.
 // Timeout: 10s -- commands must complete within this window or are treated as failed.
+//
+// SECURITY (2026-10-24): the gateway's Command API can command a physical
+// relay (relay_off cuts a vehicle's engine) and was previously reachable by
+// anything in the VPC with no authentication at all -- a security-group CIDR
+// rule is not an auth control. It now requires this shared secret on every
+// request, same pattern as AdminSync:Key for Admin<->API trust. Fail fast on
+// a missing key, same as the other required config below, rather than
+// silently sending unauthenticated requests the gateway will now reject.
+var gatewayCommandApiKey = builder.Configuration["Gateway:CommandApiKey"]
+    ?? throw new InvalidOperationException(
+        "Gateway:CommandApiKey is not configured. Must be injected via the " +
+        "Gateway__CommandApiKey environment variable, sourced from AWS SSM. " +
+        "The gateway's Command API now refuses every request without this key.");
+
 builder.Services.AddHttpClient("GatewayCommandClient", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.Add("X-Command-Api-Key", gatewayCommandApiKey);
 });
 
 // ---- ADMIN PORTAL (Complaints -- dealer lookup) ----
