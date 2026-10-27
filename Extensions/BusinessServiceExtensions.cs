@@ -59,6 +59,8 @@ public static class BusinessServiceExtensions
         // Singleton -- must persist across requests to actually cache
         // anything. See IArchivedTripCache for correctness reasoning.
         services.AddSingleton<IArchivedTripCache, ArchivedTripCache>(); // NEW
+        services.AddScoped<IPhoneVerificationService, PhoneVerificationService>(); // NEW -- custom OTP auth (text.lk)
+        services.AddScoped<ISmsSender, TextLkSmsSender>(); // NEW
         return services;
     }
 }

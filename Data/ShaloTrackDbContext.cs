@@ -40,6 +40,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<RenewalRequest> RenewalRequests => Set<RenewalRequest>();
     public DbSet<RenewalSlip> RenewalSlips => Set<RenewalSlip>();
     public DbSet<RenewalPackage> RenewalPackages => Set<RenewalPackage>();
+    public DbSet<PhoneVerification> PhoneVerifications => Set<PhoneVerification>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -48,6 +49,12 @@ public class ShaloTrackDbContext : DbContext
         modelBuilder.Entity<Customer>()
             .HasIndex(c => c.FirebaseUid)
             .IsUnique();
+
+        // RequestOtpAsync/VerifyOtpAsync always query "latest row for this phone number" --
+        // this index is what keeps those queries fast. Rows older than 24h are pruned by
+        // PhoneVerificationCleanupWorker, so the table stays small regardless.
+        modelBuilder.Entity<PhoneVerification>()
+            .HasIndex(p => new { p.PhoneNumber, p.CreatedAt });
 
         // Existing customers must get the weekly summary ON when the column is added. Without
         // HasDefaultValue(true) EF would emit DEFAULT false for the non-nullable bool.

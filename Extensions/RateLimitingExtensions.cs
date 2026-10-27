@@ -37,6 +37,13 @@ public static class RateLimitingExtensions
         public const string PublicLive = "public_live";
         public const string AccountExport = "account_export";
         public const string AccountDelete = "account_delete";
+
+        // Custom OTP auth (2026-10-27) -- replaces Firebase Phone Auth's own SMS delivery,
+        // which several carriers were silently dropping. These are the entry point to the
+        // whole app with no token yet, so they get the tightest buckets in the API: free SMS
+        // cost on one side, account-takeover guesses on the other.
+        public const string OtpRequest = "otp_request";
+        public const string OtpVerify = "otp_verify";
     }
 
     public static IServiceCollection AddShaloTrackRateLimiting(
@@ -153,6 +160,42 @@ public static class RateLimitingExtensions
                     {
                         PermitLimit = 5,
                         Window = TimeSpan.FromHours(1),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
+            });
+
+            // 5 OTP SMS requests / 15 min per IP. PhoneVerificationService adds its own
+            // per-phone-number cap (5/hour) on top -- this IP bucket is what stops one attacker
+            // from cycling through many numbers, the per-number cap is what stops many IPs
+            // (a VPN, a botnet) targeting one number.
+            options.AddPolicy(Policies.OtpRequest, httpContext =>
+            {
+                var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+                return RateLimitPartition.GetFixedWindowLimiter("otp-req:" + ip, _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(15),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
+            });
+
+            // 10 verify attempts / 5 min per IP. Looser than the request bucket (genuine typos
+            // happen) but still bounds brute-force guessing against the 6-digit code -- combined
+            // with the 5-attempt-per-code lockout in PhoneVerificationService, this closes off
+            // credential stuffing from a single source even across many requested codes.
+            options.AddPolicy(Policies.OtpVerify, httpContext =>
+            {
+                var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+                return RateLimitPartition.GetFixedWindowLimiter("otp-verify:" + ip, _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(5),
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                         QueueLimit = 0
                     });

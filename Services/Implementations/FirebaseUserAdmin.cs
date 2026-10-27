@@ -39,4 +39,31 @@ public class FirebaseUserAdmin : IFirebaseUserAdmin
             // Already gone: a retry after a partial purge lands here, which is fine.
         }
     }
+
+    public async Task<(string Uid, bool IsNewUser)> GetOrCreateUserByPhoneAsync(
+        string e164PhoneNumber, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var existing = await Client.GetUserByPhoneNumberAsync(e164PhoneNumber, cancellationToken);
+            return (existing.Uid, false);
+        }
+        catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
+        {
+            // No Firebase account for this number yet -- create one. We just proved ownership of
+            // the number ourselves (OTP via text.lk), so this is the one place that's allowed to
+            // create a Firebase user without Firebase itself having verified anything.
+            var created = await Client.CreateUserAsync(new UserRecordArgs
+            {
+                PhoneNumber = e164PhoneNumber
+            }, cancellationToken);
+
+            return (created.Uid, true);
+        }
+    }
+
+    public async Task<string> CreateCustomTokenAsync(string uid, CancellationToken cancellationToken = default)
+    {
+        return await Client.CreateCustomTokenAsync(uid, cancellationToken);
+    }
 }

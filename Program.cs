@@ -51,6 +51,10 @@ builder.Services.AddHostedService<WeeklySummaryWorker>();
 // defaults to true (fails safe: logs what it would erase, changes nothing).
 builder.Services.AddHostedService<AccountPurgeWorker>();
 
+// ---- CUSTOM OTP AUTH CLEANUP (2026-10-27) ----
+// Prunes spent/expired PhoneVerification rows. See PhoneVerificationCleanupWorker.
+builder.Services.AddHostedService<PhoneVerificationCleanupWorker>();
+
 // ASP.NET Core
 builder.Services.AddControllers();
 builder.Services.AddSwaggerDocumentation();
@@ -193,6 +197,34 @@ builder.Services.AddHttpClient("GatewayCommandClient", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
     client.DefaultRequestHeaders.Add("X-Command-Api-Key", gatewayCommandApiKey);
+});
+
+// ---- CUSTOM OTP AUTH -- TEXT.LK (2026-10-27) ----
+// Replaces Firebase Phone Auth's own SMS delivery (Dialog/Airtel/Hutch were silently
+// dropping Firebase's SMS -- see security-audit notes). text.lk sends the code; Firebase
+// stays the session/token issuer via custom tokens (FirebaseUserAdmin.CreateCustomTokenAsync),
+// so the JwtBearer config above and everything downstream of it is completely unchanged.
+// Fail-fast on missing config, same pattern as Gateway:CommandApiKey above --
+// a half-configured OTP path that silently 500s on every request is worse than refusing to boot.
+var textLkApiKey = builder.Configuration["TextLk:ApiKey"]
+    ?? throw new InvalidOperationException(
+        "TextLk:ApiKey is not configured. Must be injected via the TextLk__ApiKey " +
+        "environment variable, sourced from AWS SSM. The OTP endpoints have no fallback " +
+        "to Firebase Phone Auth -- a missing key means nobody can sign in.");
+
+_ = builder.Configuration["TextLk:SenderId"]
+    ?? throw new InvalidOperationException(
+        "TextLk:SenderId is not configured. Must be injected via the TextLk__SenderId " +
+        "environment variable.");
+
+builder.Services.AddHttpClient("TextLk", client =>
+{
+    client.BaseAddress = new Uri("https://app.text.lk");
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.Authorization =
+        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", textLkApiKey);
+    client.DefaultRequestHeaders.Accept.Add(
+        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 });
 
 // ---- ADMIN PORTAL (Complaints -- dealer lookup) ----
