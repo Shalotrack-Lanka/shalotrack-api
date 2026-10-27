@@ -631,6 +631,46 @@ namespace ShaloTrack_API.Migrations
                     b.ToTable("LiveShareLinks");
                 });
 
+            modelBuilder.Entity("ShaloTrack_API.Models.PhoneVerification", b =>
+                {
+                    b.Property<Guid>("PhoneVerificationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PhoneNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequestIp")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Salt")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("PhoneVerificationId");
+
+                    b.HasIndex("PhoneNumber", "CreatedAt");
+
+                    b.ToTable("PhoneVerifications");
+                });
+
             modelBuilder.Entity("ShaloTrack_API.Models.RawPacket", b =>
                 {
                     b.Property<long>("PacketId")
