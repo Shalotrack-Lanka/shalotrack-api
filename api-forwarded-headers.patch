@@ -1,0 +1,41 @@
+diff --git a/Program.cs b/Program.cs
+index 7d701cb..b870f8e 100644
+--- a/Program.cs
++++ b/Program.cs
+@@ -86,6 +86,7 @@ builder.Services.AddCors(options =>
+         policy.WithOrigins(allowedOrigins)
+               .AllowAnyHeader()
+               .AllowAnyMethod()
++              .WithExposedHeaders("Retry-After") // lets the Fleet login page show an exact cooldown
+               .AllowCredentials(); // Required for SignalR WebSocket handshake
+     });
+ });
+@@ -249,10 +250,25 @@ builder.Services.AddHttpClient("AdminPortal", client =>
+ 
+ var app = builder.Build();
+ 
+-app.UseForwardedHeaders(new ForwardedHeadersOptions
++// REAL CLIENT IP behind Cloudflare -> ALB -> container.
++// Cloudflare adds the visitor's address to X-Forwarded-For and the ALB appends the address it
++// saw (a Cloudflare edge IP), so the header arrives as "client, cloudflare-edge": two hops.
++// Defaults trust only loopback proxies and ForwardLimit=1, which made RemoteIpAddress the ALB's
++// own IP -- every visitor then shared ONE rate-limit bucket (one busy minute = everyone locked out).
++//
++// Trusting every proxy is safe ONLY because the container security group accepts traffic from the
++// ALB alone. Anyone who can still hit the ALB directly (its SG is open until F2 stage C/D lands)
++// can prepend a fake X-Forwarded-For entry, so per-IP limits are bypassable until then. The
++// per-phone limits in PhoneVerificationService do not depend on the IP and stay effective.
++// Set Network:ForwardedHops to 1 if Cloudflare is ever removed from the path.
++var forwardedOptions = new ForwardedHeadersOptions
+ {
+-    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+-});
++    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
++    ForwardLimit = builder.Configuration.GetValue("Network:ForwardedHops", 2)
++};
++forwardedOptions.KnownNetworks.Clear();
++forwardedOptions.KnownProxies.Clear();
++app.UseForwardedHeaders(forwardedOptions);
+ 
+ app.UseExceptionHandler(exceptionHandlerApp =>
+ {
