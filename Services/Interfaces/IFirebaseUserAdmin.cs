@@ -22,4 +22,11 @@ public interface IFirebaseUserAdmin
     /// point (JwtBearer validation, CurrentUser, FCM) changes.
     /// </summary>
     Task<string> CreateCustomTokenAsync(string uid, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The phone number (E.164) that Firebase holds for <paramref name="uid"/>, i.e. the number our own
+    /// OTP proved, or null if the account has none / does not exist. This is the authoritative source for
+    /// "which phone did this person verify": never trust a phone number sent in a request body.
+    /// </summary>
+    Task<string?> GetPhoneNumberAsync(string uid, CancellationToken cancellationToken = default);
 }

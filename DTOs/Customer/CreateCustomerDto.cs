@@ -13,8 +13,9 @@ public class CreateCustomerDto
     [MaxLength(150)]
     public string Email { get; set; } = string.Empty;
 
-    [Required]
-    [Phone]
+    // IGNORED by the server: the profile always gets the phone number Firebase holds for the caller
+    // (the one our OTP verified, see CustomerService.CreateAsync). Kept optional so existing clients that
+    // still send it keep working and new clients are not forced to.
     [MaxLength(20)]
     public string PhoneNumber { get; set; } = string.Empty;
 
