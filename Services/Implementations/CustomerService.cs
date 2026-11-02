@@ -16,12 +16,14 @@ public class CustomerService : ICustomerService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
+    private readonly IFirebaseUserAdmin _firebaseUserAdmin;
 
     //constructor method
-    public CustomerService(IUnitOfWork unitOfWork, ICurrentUser currentUser)
+    public CustomerService(IUnitOfWork unitOfWork, ICurrentUser currentUser, IFirebaseUserAdmin firebaseUserAdmin)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _firebaseUserAdmin = firebaseUserAdmin;
     }
 
     public async Task<ApiResponse<CustomerResponseDto>> GetMyProfileAsync()
@@ -110,6 +112,19 @@ public class CustomerService : ICustomerService
         // or trust decisions. (The earlier email_verified gate, added 7 Sep after the Android app could
         // skip verification, is intentionally gone; this endpoint still requires an authenticated token.)
 
+        // SECURITY: the phone number is the ONLY identity proof now, so the profile must carry the number our
+        // OTP actually verified for this account (read from Firebase), never the one sent in the request body.
+        // Before this, any signed-in user could register a profile that claims someone else's number.
+        var verifiedPhone = await _firebaseUserAdmin.GetPhoneNumberAsync(uid);
+        if (string.IsNullOrEmpty(verifiedPhone))
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.Forbidden,
+                "Phone number not verified.",
+                "Sign in with your phone number to create a profile."
+            );
+        }
+
         if (await _unitOfWork.Customers.GetByFirebaseUidAsync(uid) is not null)
         {
             return ApiResponse<CustomerResponseDto>.Fail(
@@ -144,7 +159,7 @@ public class CustomerService : ICustomerService
             FirebaseUid = uid,
             FullName = dto.FullName,
             Email = dto.Email,
-            PhoneNumber = dto.PhoneNumber,
+            PhoneNumber = verifiedPhone,
             NicNumber = dto.NicNumber,
             Address = dto.Address,
             AccountStatus = CustomerStatus.Active,

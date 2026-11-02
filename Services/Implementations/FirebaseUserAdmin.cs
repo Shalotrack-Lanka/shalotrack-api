@@ -66,4 +66,17 @@ public class FirebaseUserAdmin : IFirebaseUserAdmin
     {
         return await Client.CreateCustomTokenAsync(uid, cancellationToken);
     }
+
+    public async Task<string?> GetPhoneNumberAsync(string uid, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var user = await Client.GetUserAsync(uid, cancellationToken);
+            return string.IsNullOrWhiteSpace(user.PhoneNumber) ? null : user.PhoneNumber;
+        }
+        catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
+        {
+            return null;
+        }
+    }
 }
