@@ -52,7 +52,7 @@ public class DeviceHealthService : IDeviceHealthService
                 VehicleNumber = r.VehicleNumber,
                 LastContactUtc = Latest(r.LastSeen, r.LastHeartbeat),
                 Power = r.Power?.ToString(),
-                BatteryLevel = r.Battery,
+                BatteryLevel = r.Battery is int rawBattery ? BatteryScale.ToPercent(rawBattery) : null,
                 GpsSignal = r.Gps
             })
             .ToList();

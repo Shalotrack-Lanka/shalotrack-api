@@ -34,6 +34,13 @@ public class LiveShareLinkRepository : ILiveShareLinkRepository
         return await _context.LiveShareLinks.FirstOrDefaultAsync(l => l.LinkId == linkId);
     }
 
+    public async Task<int> RevokeAsync(Guid linkId, DateTime nowUtc)
+    {
+        return await _context.LiveShareLinks
+            .Where(l => l.LinkId == linkId && l.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(l => l.RevokedAt, (DateTime?)nowUtc));
+    }
+
     public async Task<LiveShareLink?> GetByTokenHashAsync(string tokenHash)
     {
         return await _context.LiveShareLinks

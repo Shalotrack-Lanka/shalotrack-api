@@ -213,7 +213,7 @@ public class LocationNotificationListener : BackgroundService
             {
                 state.IgnitionStatus = status.IgnitionStatus;
                 state.PowerStatus = (int)status.PowerStatus == 1;
-                state.IsLowBattery = status.BatteryLevel < LowBatteryThresholdPercent;
+                state.IsLowBattery = BatteryScale.IsLow(status.BatteryLevel);
             }
         }
 
@@ -564,13 +564,14 @@ public class LocationNotificationListener : BackgroundService
             }
             state.PowerStatus = isDisconnected;
 
-            bool isLowBattery = data.BatteryLevel < LowBatteryThresholdPercent;
+            // The raw value is the tracker's 0-6 level (or 0 = not reported), NOT a percentage: see BatteryScale.
+            bool isLowBattery = BatteryScale.IsLow(data.BatteryLevel);
             if (isLowBattery && !state.IsLowBattery)
             {
                 alertsToCreate.Add(BuildAlert(
                     data.VehicleId!.Value, data.DeviceId, null, null,
                     AlertType.LowBattery,
-                    $"Battery level dropped below {LowBatteryThresholdPercent}% (currently {data.BatteryLevel}%)"));
+                    $"Battery level dropped below {LowBatteryThresholdPercent}% (currently about {BatteryScale.ToPercent(data.BatteryLevel)}%)"));
             }
             state.IsLowBattery = isLowBattery;
         }

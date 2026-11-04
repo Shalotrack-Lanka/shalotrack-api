@@ -13,8 +13,17 @@ public interface ILiveShareLinkRepository
     /// <summary>No-tracking, newest first.</summary>
     Task<List<LiveShareLink>> GetActiveByVehicleAsync(Guid vehicleId, DateTime nowUtc);
 
-    /// <summary>Tracked (for revoke).</summary>
+    /// <summary>
+    /// By id. NOT tracked: the DbContext is no-tracking by default (see DatabaseExtensions), so changing the
+    /// returned entity and calling SaveChanges saves nothing. To stop a link use <see cref="RevokeAsync"/>.
+    /// </summary>
     Task<LiveShareLink?> GetByIdAsync(Guid linkId);
+
+    /// <summary>
+    /// Stops a link: sets RevokedAt in one UPDATE (no tracking needed, safe to repeat, never moves an earlier
+    /// RevokedAt). Returns the number of rows changed (0 when it was already stopped).
+    /// </summary>
+    Task<int> RevokeAsync(Guid linkId, DateTime nowUtc);
 
     /// <summary>No-tracking, by the SHA-256 hex of the token.</summary>
     Task<LiveShareLink?> GetByTokenHashAsync(string tokenHash);
