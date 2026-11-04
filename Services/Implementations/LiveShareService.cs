@@ -133,11 +133,10 @@ public class LiveShareService : ILiveShareService
         if (link is null || link.CustomerId != customer.CustomerId)
             return OwnerNotFound<string>();
 
+        // One UPDATE straight to the database. (Setting RevokedAt on the loaded entity and calling SaveChanges
+        // did NOTHING: the context is no-tracking by default, so the link stayed live while the API said "Stopped".)
         if (link.RevokedAt is null)
-        {
-            link.RevokedAt = DateTime.UtcNow;
-            await _unitOfWork.SaveChangesAsync();
-        }
+            await _links.RevokeAsync(link.LinkId, DateTime.UtcNow);
 
         return ApiResponse<string>.Ok("Stopped", "Live link stopped.");
     }

@@ -33,6 +33,7 @@ public class DeviceStatusService : IDeviceStatusService
         }
 
         var statuses = await _repository.GetAllAsync();
+        foreach (var s in statuses) s.BatteryLevel = BatteryScale.ToPercent(s.BatteryLevel);
         return ApiResponse<IReadOnlyList<DeviceStatusResponseDto>>.Ok(
             statuses, "Device statuses retrieved successfully.");
     }
@@ -45,6 +46,7 @@ public class DeviceStatusService : IDeviceStatusService
         {
             return NotFound();
         }
+        status.BatteryLevel = BatteryScale.ToPercent(status.BatteryLevel);
         return ApiResponse<DeviceStatusResponseDto>.Ok(status, "Device status retrieved successfully.");
     }
 
@@ -55,6 +57,7 @@ public class DeviceStatusService : IDeviceStatusService
         {
             return NotFound();
         }
+        status.BatteryLevel = BatteryScale.ToPercent(status.BatteryLevel);
         return ApiResponse<DeviceStatusResponseDto>.Ok(status, "Device status retrieved successfully.");
     }
 
