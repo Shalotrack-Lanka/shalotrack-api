@@ -631,6 +631,54 @@ namespace ShaloTrack_API.Migrations
                     b.ToTable("LiveShareLinks");
                 });
 
+            modelBuilder.Entity("ShaloTrack_API.Models.PhoneChangeVerification", b =>
+                {
+                    b.Property<Guid>("PhoneChangeVerificationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NewPhoneNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequestIp")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Salt")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("PhoneChangeVerificationId");
+
+                    b.HasIndex("CustomerId", "CreatedAt");
+
+                    b.HasIndex("NewPhoneNumber", "CreatedAt");
+
+                    b.ToTable("PhoneChangeVerifications");
+                });
+
             modelBuilder.Entity("ShaloTrack_API.Models.PhoneVerification", b =>
                 {
                     b.Property<Guid>("PhoneVerificationId")
@@ -1345,6 +1393,15 @@ namespace ShaloTrack_API.Migrations
                     b.HasOne("ShaloTrack_API.Models.Vehicle", null)
                         .WithMany()
                         .HasForeignKey("VehicleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ShaloTrack_API.Models.PhoneChangeVerification", b =>
+                {
+                    b.HasOne("ShaloTrack_API.Models.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

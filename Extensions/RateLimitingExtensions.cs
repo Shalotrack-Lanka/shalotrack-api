@@ -44,6 +44,11 @@ public static class RateLimitingExtensions
         // cost on one side, account-takeover guesses on the other.
         public const string OtpRequest = "otp_request";
         public const string OtpVerify = "otp_verify";
+
+        // Changing the sign-in phone number (authenticated, per account). Each code is an SMS that costs money and
+        // can annoy a stranger; the code is only 6 digits. PhoneChangeService adds per-customer and per-number caps.
+        public const string PhoneChangeRequest = "phone_change_request";
+        public const string PhoneChangeVerify = "phone_change_verify";
     }
 
     public static IServiceCollection AddShaloTrackRateLimiting(
@@ -196,6 +201,39 @@ public static class RateLimitingExtensions
                     {
                         PermitLimit = 10,
                         Window = TimeSpan.FromMinutes(5),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
+            });
+
+            // Phone-number change: 6 code requests / hour and 15 verify attempts / hour per account.
+            options.AddPolicy(Policies.PhoneChangeRequest, httpContext =>
+            {
+                var uid = httpContext.User?.FindFirst("sub")?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "anonymous";
+
+                return RateLimitPartition.GetFixedWindowLimiter("phone-change-req:" + uid, _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 6,
+                        Window = TimeSpan.FromHours(1),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
+            });
+
+            options.AddPolicy(Policies.PhoneChangeVerify, httpContext =>
+            {
+                var uid = httpContext.User?.FindFirst("sub")?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "anonymous";
+
+                return RateLimitPartition.GetFixedWindowLimiter("phone-change-verify:" + uid, _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 15,
+                        Window = TimeSpan.FromHours(1),
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                         QueueLimit = 0
                     });

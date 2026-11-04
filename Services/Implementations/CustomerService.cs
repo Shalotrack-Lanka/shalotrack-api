@@ -195,9 +195,22 @@ public class CustomerService : ICustomerService
             );
         }
 
+        // SECURITY: the phone number is the sign-in identity and the account's only proof of who the owner is, so a
+        // customer can NOT change it through this call. It changes only through the verified flow (a code texted to
+        // the new number): POST api/Customers/me/phone-change/request and /verify. Sending the SAME number is fine
+        // (apps send the whole profile back); a different one is refused. Staff (Admin/Dealer) keep the old behaviour
+        // for support cases. NOTE: a staff edit changes the customer record only, not the Firebase login.
+        if (!_currentUser.IsStaff && !IsSamePhone(customer.PhoneNumber, dto.PhoneNumber))
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest,
+                "To change your phone number, use the phone number change option (a code is sent to the new number).",
+                "PHONE_CHANGE_REQUIRES_VERIFICATION");
+        }
+
         // Update entity
         customer.FullName = dto.FullName;
-        customer.PhoneNumber = dto.PhoneNumber;
+        if (_currentUser.IsStaff) customer.PhoneNumber = dto.PhoneNumber;
         customer.Address = dto.Address;
         customer.ProfileImage = dto.ProfileImage;
         customer.UpdatedAt = DateTime.UtcNow;
@@ -241,6 +254,15 @@ public class CustomerService : ICustomerService
             "Customer deactivated successfully.",
             "Customer deactivated successfully."
         );
+    }
+
+    /// <summary>Same number in any spelling ("+94771234567" == "0771234567"); exact text always matches itself.</summary>
+    private static bool IsSamePhone(string? stored, string? sent)
+    {
+        if (string.Equals(stored, sent, StringComparison.Ordinal)) return true;
+        return PhoneNumberNormalizer.TryNormalize(stored, out var a)
+            && PhoneNumberNormalizer.TryNormalize(sent, out var b)
+            && a == b;
     }
 
     private static CustomerResponseDto ToDto(Customer customer)

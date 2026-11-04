@@ -79,4 +79,34 @@ public class FirebaseUserAdmin : IFirebaseUserAdmin
             return null;
         }
     }
+
+    public async Task<string?> FindUidByPhoneNumberAsync(string e164PhoneNumber, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var user = await Client.GetUserByPhoneNumberAsync(e164PhoneNumber, cancellationToken);
+            return user.Uid;
+        }
+        catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
+        {
+            return null;
+        }
+    }
+
+    public async Task<bool> SetPhoneNumberAsync(string uid, string e164PhoneNumber, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await Client.UpdateUserAsync(new UserRecordArgs
+            {
+                Uid = uid,
+                PhoneNumber = e164PhoneNumber
+            }, cancellationToken);
+            return true;
+        }
+        catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.PhoneNumberAlreadyExists)
+        {
+            return false;
+        }
+    }
 }
