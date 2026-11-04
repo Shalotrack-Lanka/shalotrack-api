@@ -106,6 +106,20 @@ public class CustomerService : ICustomerService
             );
         }
 
+        // Name and address follow the same rules as the Fleet web portal (see CustomerInputRules). Stored tidy.
+        dto.FullName = CustomerInputRules.Tidy(dto.FullName) ?? string.Empty;
+        dto.Address = CustomerInputRules.TidyAddress(dto.Address);
+        if (!CustomerInputRules.IsValidName(dto.FullName))
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest, CustomerInputRules.NameMessage, "INVALID_FULL_NAME");
+        }
+        if (!CustomerInputRules.IsValidAddress(dto.Address))
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest, CustomerInputRules.AddressMessage, "INVALID_ADDRESS");
+        }
+
         // DECISION (2 Nov 2026, owner): email verification is removed. The phone number, proven by our
         // own OTP (text.lk) before this token existed, is the only identity check. The email is a plain
         // contact field: it is NOT proof of anything, so nothing may use it for recovery, account linking
@@ -208,10 +222,26 @@ public class CustomerService : ICustomerService
                 "PHONE_CHANGE_REQUIRES_VERIFICATION");
         }
 
+        // Name and address follow the same rules as the Fleet web portal (see CustomerInputRules), checked only
+        // when the value CHANGED: a profile saved before these rules existed (a digit in the name, say) can still
+        // have its other fields edited, because apps send the whole profile back.
+        var newName = CustomerInputRules.Tidy(dto.FullName) ?? string.Empty;
+        var newAddress = CustomerInputRules.TidyAddress(dto.Address);
+        if (!CustomerInputRules.SameText(newName, customer.FullName) && !CustomerInputRules.IsValidName(newName))
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest, CustomerInputRules.NameMessage, "INVALID_FULL_NAME");
+        }
+        if (!CustomerInputRules.SameText(newAddress, customer.Address) && !CustomerInputRules.IsValidAddress(newAddress))
+        {
+            return ApiResponse<CustomerResponseDto>.Fail(
+                (int)HttpStatusCode.BadRequest, CustomerInputRules.AddressMessage, "INVALID_ADDRESS");
+        }
+
         // Update entity
-        customer.FullName = dto.FullName;
+        customer.FullName = newName;
         if (_currentUser.IsStaff) customer.PhoneNumber = dto.PhoneNumber;
-        customer.Address = dto.Address;
+        customer.Address = newAddress;
         customer.ProfileImage = dto.ProfileImage;
         customer.UpdatedAt = DateTime.UtcNow;
 
