@@ -43,6 +43,17 @@ public class PhoneVerificationCleanupWorker : BackgroundService
                 {
                     _logger.LogInformation("PhoneVerificationCleanupWorker: deleted {Count} rows older than 24h.", deleted);
                 }
+
+                // Phone-number change challenges: kept 48 h (the "one change per 24 h" rule reads recent rows), then pruned.
+                var changeCutoff = DateTime.UtcNow.AddHours(-48);
+                var deletedChanges = await db.PhoneChangeVerifications
+                    .Where(p => p.CreatedAt < changeCutoff)
+                    .ExecuteDeleteAsync(stoppingToken);
+
+                if (deletedChanges > 0)
+                {
+                    _logger.LogInformation("PhoneVerificationCleanupWorker: deleted {Count} phone-change rows older than 48h.", deletedChanges);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

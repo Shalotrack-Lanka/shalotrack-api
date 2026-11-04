@@ -41,6 +41,7 @@ public class ShaloTrackDbContext : DbContext
     public DbSet<RenewalSlip> RenewalSlips => Set<RenewalSlip>();
     public DbSet<RenewalPackage> RenewalPackages => Set<RenewalPackage>();
     public DbSet<PhoneVerification> PhoneVerifications => Set<PhoneVerification>();
+    public DbSet<PhoneChangeVerification> PhoneChangeVerifications => Set<PhoneChangeVerification>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -55,6 +56,15 @@ public class ShaloTrackDbContext : DbContext
         // PhoneVerificationCleanupWorker, so the table stays small regardless.
         modelBuilder.Entity<PhoneVerification>()
             .HasIndex(p => new { p.PhoneNumber, p.CreatedAt });
+
+        // Phone-number change challenges (see PhoneChangeService): looked up by customer ("latest challenge",
+        // "changed in the last 24 h") and by target number ("how many codes went to this number this hour").
+        modelBuilder.Entity<PhoneChangeVerification>(e =>
+        {
+            e.HasIndex(p => new { p.CustomerId, p.CreatedAt });
+            e.HasIndex(p => new { p.NewPhoneNumber, p.CreatedAt });
+            e.HasOne<Customer>().WithMany().HasForeignKey(p => p.CustomerId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         // Existing customers must get the weekly summary ON when the column is added. Without
         // HasDefaultValue(true) EF would emit DEFAULT false for the non-nullable bool.

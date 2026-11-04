@@ -29,4 +29,17 @@ public interface IFirebaseUserAdmin
     /// "which phone did this person verify": never trust a phone number sent in a request body.
     /// </summary>
     Task<string?> GetPhoneNumberAsync(string uid, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The uid of the Firebase account that holds <paramref name="e164PhoneNumber"/>, or null if no account does.
+    /// Firebase keeps phone numbers unique, so this is the authority on "is this number taken".
+    /// </summary>
+    Task<string?> FindUidByPhoneNumberAsync(string e164PhoneNumber, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Moves the account's sign-in number to <paramref name="e164PhoneNumber"/>. Returns false (and changes nothing)
+    /// if another Firebase account already holds that number: Firebase enforces this atomically, so two people
+    /// racing for one number cannot both win. Only call after the new number has been proved with our own OTP.
+    /// </summary>
+    Task<bool> SetPhoneNumberAsync(string uid, string e164PhoneNumber, CancellationToken cancellationToken = default);
 }

@@ -14,10 +14,12 @@ namespace ShaloTrack_API.Controllers;
 public class CustomersController : ControllerBase
 {
     private readonly ICustomerService _customerService;
+    private readonly IPhoneChangeService _phoneChangeService;
 
-    public CustomersController(ICustomerService customerService)
+    public CustomersController(ICustomerService customerService, IPhoneChangeService phoneChangeService)
     {
         _customerService = customerService;
+        _phoneChangeService = phoneChangeService;
     }
 
     /// <summary>
@@ -29,6 +31,38 @@ public class CustomersController : ControllerBase
     public async Task<IActionResult> GetMyProfile()
     {
         var response = await _customerService.GetMyProfileAsync();
+        return StatusCode(response.StatusCode, response);
+    }
+
+    /// <summary>
+    /// Step 1 of changing the sign-in phone number: text a one-time code to the NEW number.
+    /// Needs a sign-in from the last 10 minutes (403 REAUTH_REQUIRED otherwise). The caller is always the
+    /// signed-in customer (resolved from the token); there is no customerId to tamper with.
+    /// </summary>
+    [HttpPost("me/phone-change/request")]
+    [EnableRateLimiting(RateLimitingExtensions.Policies.PhoneChangeRequest)]
+    public async Task<IActionResult> RequestPhoneChange([FromBody] RequestPhoneChangeDto dto)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var response = await _phoneChangeService.RequestAsync(dto, ip);
+        return StatusCode(response.StatusCode, response);
+    }
+
+    /// <summary>
+    /// Step 2: the code that arrived on the new number. On success the number changes on the customer record and on
+    /// the Firebase login, other sessions are signed out, and the old number is told.
+    /// </summary>
+    [HttpPost("me/phone-change/verify")]
+    [EnableRateLimiting(RateLimitingExtensions.Policies.PhoneChangeVerify)]
+    public async Task<IActionResult> VerifyPhoneChange([FromBody] VerifyPhoneChangeDto dto)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        var response = await _phoneChangeService.VerifyAsync(dto);
         return StatusCode(response.StatusCode, response);
     }
 

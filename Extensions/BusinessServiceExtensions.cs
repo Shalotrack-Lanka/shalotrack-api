@@ -61,6 +61,7 @@ public static class BusinessServiceExtensions
         services.AddSingleton<IArchivedTripCache, ArchivedTripCache>(); // NEW
         services.AddScoped<IPhoneVerificationService, PhoneVerificationService>(); // NEW -- custom OTP auth (text.lk)
         services.AddScoped<ISmsSender, TextLkSmsSender>(); // NEW
+        services.AddScoped<IPhoneChangeService, PhoneChangeService>(); // NEW -- verified phone-number change
         return services;
     }
 }
