@@ -48,7 +48,11 @@ public class CustomerService : ICustomerService
             );
         }
 
-        return ApiResponse<CustomerResponseDto>.Ok(ToDto(customer), "Profile retrieved successfully.");
+        // GetByFirebaseUidAsync does not load Vehicles (it also runs on every auth lookup), so ToDto would always
+        // report 0. Count the active vehicles directly instead.
+        var dto = ToDto(customer);
+        dto.VehicleCount = await _unitOfWork.Customers.CountActiveVehiclesAsync(customer.CustomerId);
+        return ApiResponse<CustomerResponseDto>.Ok(dto, "Profile retrieved successfully.");
     }
 
     public async Task<ApiResponse<IReadOnlyList<CustomerResponseDto>>> GetAllAsync()
