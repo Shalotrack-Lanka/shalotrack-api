@@ -16,6 +16,12 @@ public class CustomerRepository : ICustomerRepository
         _context = context;
     }
 
+    /// <summary>Active (not soft-deleted) vehicles the customer owns. A COUNT in SQL, no entities loaded.</summary>
+    public async Task<int> CountActiveVehiclesAsync(Guid customerId)
+    {
+        return await _context.Vehicles.CountAsync(v => v.CustomerId == customerId && v.IsActive);
+    }
+
     public async Task<Customer?> GetByFirebaseUidAsync(string firebaseUid)
     {
         return await _context.Customers

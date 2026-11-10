@@ -14,6 +14,7 @@ public interface ICustomerRepository
     void Update(Customer customer);
     void Delete(Customer customer);
     Task<Customer?> GetByFirebaseUidAsync(string firebaseUid);
+    Task<int> CountActiveVehiclesAsync(Guid customerId);
     Task<Customer?> GetByPhoneNumberAsync(string phoneNumber);
     Task<DashboardResponseDto?> GetDashboardAsync(Guid customerId);
 }
