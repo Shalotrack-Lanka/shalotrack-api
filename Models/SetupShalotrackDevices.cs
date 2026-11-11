@@ -26,6 +26,15 @@ namespace ShaloTrack_API.Models
         public int? DealerId { get; set; }
         public int? DeviceTypeId { get; set; }
 
+        // Gateway-owned: UTC time the device first connected to the gateway.
+        // Starts the 24h trial clock for a device that is not yet bound.
+        // The Admin sync never writes this.
+        public DateTime? FirstSeenAt { get; set; }
+
+        // Admin-owned: UTC time the office bound the device to a customer's
+        // vehicle. Non-null ends the trial. Written only by the Admin sync.
+        public DateTime? BoundAt { get; set; }
+
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }

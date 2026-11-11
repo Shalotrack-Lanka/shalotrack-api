@@ -35,6 +35,7 @@ public class SetupShalotrackDeviceService : ISetupShalotrackDeviceService
                 CanceledDate = dto.CanceledDate,
                 DealerId = dto.DealerId,
                 DeviceTypeId = dto.DeviceTypeId,
+                BoundAt = ResolveBoundAt(dto, null),
                 CreatedAt = dto.CreatedAt,
                 UpdatedAt = dto.UpdatedAt,
             };
@@ -50,6 +51,7 @@ public class SetupShalotrackDeviceService : ISetupShalotrackDeviceService
             existing.CanceledDate = dto.CanceledDate;
             existing.DealerId = dto.DealerId;
             existing.DeviceTypeId = dto.DeviceTypeId;
+            existing.BoundAt = ResolveBoundAt(dto, existing.BoundAt);
             existing.UpdatedAt = dto.UpdatedAt;
 
             _unitOfWork.SetupShalotrackDevices.Update(existing);
@@ -58,5 +60,15 @@ public class SetupShalotrackDeviceService : ISetupShalotrackDeviceService
         await _unitOfWork.SaveChangesAsync();
 
         return ApiResponse<string>.Ok("Device synced successfully.", "Device synced successfully.");
+    }
+
+    // Old Admin payloads (IsBound == null) never change the stored value, so
+    // deploying the API before Admin is safe. FirstSeenAt is deliberately not
+    // touched here: it belongs to the gateway.
+    private static DateTime? ResolveBoundAt(SyncSetupShalotrackDeviceDto dto, DateTime? current)
+    {
+        if (dto.IsBound is null) return current;
+        if (dto.IsBound == false) return null;
+        return dto.BoundAt?.ToUniversalTime() ?? current ?? DateTime.UtcNow;
     }
 }

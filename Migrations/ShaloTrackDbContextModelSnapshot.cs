@@ -952,6 +952,9 @@ namespace ShaloTrack_API.Migrations
                     b.Property<int>("Id")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("BoundAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("CancelReason")
                         .HasColumnType("text");
 
@@ -970,6 +973,9 @@ namespace ShaloTrack_API.Migrations
 
                     b.Property<int?>("DeviceTypeId")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ImeiNumber")
                         .IsRequired()
