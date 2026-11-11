@@ -13,11 +13,17 @@ public class DeviceAssignmentService : IDeviceAssignmentService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
+    private readonly IConfiguration _configuration;
 
-    public DeviceAssignmentService(IUnitOfWork unitOfWork, ICurrentUser currentUser)
+    // Statuses the gateway also refuses outright (see shalotrack-gateway services/device_access.py).
+    private static readonly string[] StoppedStatuses =
+        { "Temporarily Stopped", "Pending Repair", "Broken Device" };
+
+    public DeviceAssignmentService(IUnitOfWork unitOfWork, ICurrentUser currentUser, IConfiguration configuration)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _configuration = configuration;
     }
 
     public async Task<ApiResponse<IReadOnlyList<DeviceAssignmentResponseDto>>> GetAllAsync()
@@ -141,6 +147,30 @@ public class DeviceAssignmentService : IDeviceAssignmentService
                 "GPS device not found.",
                 "The specified GPS device does not exist."
             );
+        }
+
+        // Trial devices (sold, but the office has not bound them yet) cannot be claimed by a customer.
+        // OFF by default (DeviceLinking:RequireBoundDevice): behaviour is unchanged until it is switched
+        // on once the office binds in the ERP before customers link in the app. Staff are never blocked.
+        if (!_currentUser.IsStaff
+            && bool.TryParse(_configuration["DeviceLinking:RequireBoundDevice"], out var requireBound) && requireBound)
+        {
+            var linkable = await _unitOfWork.GpsDevices.GetByIdAsync(dto.DeviceId);
+            var setup = linkable is null
+                ? null
+                : await _unitOfWork.SetupShalotrackDevices.GetByImeiAsync(linkable.ImeiNumber);
+
+            // No setup row = legacy/demo device: allowed, as before.
+            if (setup is not null
+                && (StoppedStatuses.Contains(setup.Status)
+                    || (setup.Status != "Activated" && setup.BoundAt is null)))
+            {
+                return ApiResponse<DeviceAssignmentResponseDto>.Fail(
+                    (int)HttpStatusCode.Conflict,
+                    "Device not activated yet.",
+                    "This device has not been activated by ShaloTrack yet. Please contact your dealer or ShaloTrack support."
+                );
+            }
         }
 
         var activeVehicle =
