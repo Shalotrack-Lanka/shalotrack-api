@@ -6,7 +6,14 @@ public interface ISubscriptionGateService
     const string RenewalRequiredCode = "SUBSCRIPTION_RENEWAL_REQUIRED";
 
     /// <summary>
-    /// True when live tracking / history for this vehicle must be withheld because the
+    /// While a subscription is unpaid, trip history and trip reports stay available except for the most recent
+    /// this-many hours, so history cannot be polled as a free live feed. Live location, the live hub and
+    /// live-share links stay fully blocked. Alerts are not gated.
+    /// </summary>
+    const int UnpaidHistoryHiddenHours = 24;
+
+    /// <summary>
+    /// True when LIVE tracking for this vehicle must be withheld (and recent history is hidden, see UnpaidHistoryHiddenHours) because the
     /// subscription of its active device is unpaid or expired. Staff, the demo vehicle,
     /// vehicles with no active device and devices with no synced status row are never blocked
     /// (fails open, so nobody is locked out before the first sync has run).

@@ -111,8 +111,15 @@ public class GpsTrackingService : IGpsTrackingService
             }
         }
 
-        if (await _subscriptionGate.IsRenewalRequiredAsync(filter.VehicleId.Value))
+        // Unpaid / expired subscription: the live view stays blocked, but history stays open EXCEPT the most
+        // recent UnpaidHistoryHiddenHours, so polling this endpoint cannot be used to rebuild live tracking
+        // for free. The recording itself never stopped, so the hidden day appears as soon as it is paid.
+        bool lapsed = await _subscriptionGate.IsRenewalRequiredAsync(filter.VehicleId.Value);
+        DateTime? lapsedCutoff = lapsed ? UnpaidHistoryCutoffUtc() : null;
+
+        if (lapsed && !(filter.From.HasValue && filter.To.HasValue))
         {
+            // An open-ended "latest points" request is exactly the live feed: keep it blocked.
             return ApiResponse<IReadOnlyList<GpsTrackingResponseDto>>.Fail(
                 (int)HttpStatusCode.PaymentRequired,
                 "Subscription renewal required.",
@@ -154,10 +161,12 @@ public class GpsTrackingService : IGpsTrackingService
                     $"Tracking history is limited to {MaxTripReportDays} days per request. Split longer ranges into multiple calls.");
             }
 
-            var merged = await GetMergedPointsAsync(
-                filter.VehicleId.Value,
-                filter.From.Value,
-                filter.To.Value);
+            var merged = lapsedCutoff.HasValue && AsUtc(filter.From.Value) >= lapsedCutoff.Value
+                ? new MergedTrackingResult(new List<TrackingPointRaw>(), null, string.Empty, string.Empty)
+                : await GetMergedPointsAsync(
+                    filter.VehicleId.Value,
+                    filter.From.Value,
+                    ClampToCutoff(filter.To.Value, lapsedCutoff));
 
             var mapped = merged.Points
                 .Select(p => new GpsTrackingResponseDto
@@ -271,15 +280,15 @@ public class GpsTrackingService : IGpsTrackingService
             }
         }
 
-        if (await _subscriptionGate.IsRenewalRequiredAsync(vehicleId))
-        {
-            return ApiResponse<TripsReportResponseDto>.Fail(
-                (int)HttpStatusCode.PaymentRequired,
-                "Subscription renewal required.",
-                ISubscriptionGateService.RenewalRequiredCode);
-        }
+        // Same rule as the history endpoint: unpaid devices keep their trip reports except for the most recent
+        // UnpaidHistoryHiddenHours (so reports cannot stand in for the paid live view).
+        DateTime? lapsedCutoff = await _subscriptionGate.IsRenewalRequiredAsync(vehicleId)
+            ? UnpaidHistoryCutoffUtc()
+            : null;
 
-        var merged = await GetMergedPointsAsync(vehicleId, from, to);
+        var merged = lapsedCutoff.HasValue && AsUtc(from) >= lapsedCutoff.Value
+            ? new MergedTrackingResult(new List<TrackingPointRaw>(), null, string.Empty, string.Empty)
+            : await GetMergedPointsAsync(vehicleId, from, ClampToCutoff(to, lapsedCutoff));
 
         return ApiResponse<TripsReportResponseDto>.Ok(
             ComputeTripsReport(vehicleId, from, to, merged.Points),
@@ -308,6 +317,22 @@ public class GpsTrackingService : IGpsTrackingService
 
         return ComputeTripsReport(vehicleId, from, to, merged.Points);
     }
+
+    /// <summary>Newest moment an unpaid vehicle's history may show (now minus UnpaidHistoryHiddenHours).</summary>
+    private static DateTime UnpaidHistoryCutoffUtc() =>
+        DateTime.UtcNow.AddHours(-ISubscriptionGateService.UnpaidHistoryHiddenHours);
+
+    /// <summary>Request times arrive as Utc, Local or Unspecified; treat Unspecified as UTC like the rest of the API.</summary>
+    private static DateTime AsUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+    };
+
+    /// <summary>Ends the range at the cutoff when one applies (a paid vehicle has none).</summary>
+    private static DateTime ClampToCutoff(DateTime to, DateTime? cutoff) =>
+        cutoff.HasValue && AsUtc(to) > cutoff.Value ? cutoff.Value : to;
 
     private sealed record MergedTrackingResult(
         List<TrackingPointRaw> Points,
