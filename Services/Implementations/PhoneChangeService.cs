@@ -214,7 +214,9 @@ public class PhoneChangeService : IPhoneChangeService
         var customerId = customer.CustomerId;
         var uid = customer.FirebaseUid!;
 
+        // AsTracking: AttemptCount and AppliedAt below are saved with SaveChanges (see FindCustomerAsync).
         var challenge = await _db.PhoneChangeVerifications
+            .AsTracking()
             .Where(p => p.CustomerId == customerId && p.NewPhoneNumber == newPhone && p.ConsumedAt == null)
             .OrderByDescending(p => p.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
@@ -355,7 +357,9 @@ public class PhoneChangeService : IPhoneChangeService
         var uid = _currentUser.FirebaseUid;
         if (string.IsNullOrEmpty(uid)) return null;
 
-        return await _db.Customers.FirstOrDefaultAsync(
+        // AsTracking: the context is NoTracking by default (DatabaseExtensions), and VerifyAsync mutates this entity
+        // and calls SaveChanges. Without tracking that save writes nothing and the old number stays in the database.
+        return await _db.Customers.AsTracking().FirstOrDefaultAsync(
             c => c.FirebaseUid == uid && c.DeletedAt == null && c.DeletionRequestedAt == null, cancellationToken);
     }
 
