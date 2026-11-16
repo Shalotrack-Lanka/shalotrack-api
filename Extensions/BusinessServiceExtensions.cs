@@ -26,6 +26,7 @@ public static class BusinessServiceExtensions
         // Singleton: the live alert listener (itself a singleton) reads thresholds through it.
         services.AddSingleton<IVehicleAlertSettingsProvider, VehicleAlertSettingsProvider>();
         services.AddScoped<IVehicleReminderNotifier, VehicleReminderNotifier>();
+        services.AddScoped<IDeviceOfflineNotifier, DeviceOfflineNotifier>();
         services.AddScoped<IVehicleService, VehicleService>();
         services.AddScoped<IGpsDeviceService, GpsDeviceService>();
         services.AddScoped<IDeviceAssignmentService, DeviceAssignmentService>();

@@ -44,6 +44,12 @@ builder.Services.AddHostedService<RawPacketRetentionWorker>();
 // SubscriptionReminders:DryRun -- defaults to true (fails safe: logs only).
 builder.Services.AddHostedService<SubscriptionReminderWorker>();
 builder.Services.AddHostedService<VehicleReminderWorker>();
+
+// ---- DEVICE OFFLINE ALERTS ----
+// Alerts owners when a tracker has sent nothing for 15 minutes. Gated by DeviceOffline:DryRun --
+// defaults to true (fails safe: logs what it would send, saves and sends nothing).
+builder.Services.AddHostedService<DeviceOfflineAlertWorker>();
+
 builder.Services.AddHostedService<WeeklySummaryWorker>();
 
 // ---- ACCOUNT DELETION PURGE (PDPA) ----
