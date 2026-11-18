@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using ShaloTrack_API.DTOs.GpsDevice;
+using ShaloTrack_API.Extensions;
 using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Controllers;
@@ -85,9 +87,11 @@ public class GpsDevicesController : ControllerBase
     /// <summary>
     /// Customer-facing IMEI lookup for device linking. Any authenticated customer can
     /// call this — physical possession of the IMEI (printed on the device) is the
-    /// authorization, not identity-based ownership.
+    /// authorization, not identity-based ownership. Rate limited per account (10 per 15 min) because the reply
+    /// says whether a device exists and is free: unlimited, it would let one account enumerate IMEIs.
     /// </summary>
     [HttpGet("lookup/{imei}")]
+    [EnableRateLimiting(RateLimitingExtensions.Policies.DeviceLookup)]
     public async Task<IActionResult> LookupByImei(string imei)
     {
         var response = await _gpsDeviceService.LookupByImeiAsync(imei);
