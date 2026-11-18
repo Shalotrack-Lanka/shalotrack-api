@@ -38,6 +38,11 @@ public static class RateLimitingExtensions
         public const string AccountExport = "account_export";
         public const string AccountDelete = "account_delete";
 
+        // IMEI lookup before linking a tracker. Knowing an IMEI is the only proof needed to link a device, and the
+        // reply says whether a device exists and whether it is free, so an unlimited lookup lets one account walk
+        // a model's IMEI range and find unlinked trackers. A real customer looks up one or two.
+        public const string DeviceLookup = "device_lookup";
+
         // Custom OTP auth (2026-10-27) -- replaces Firebase Phone Auth's own SMS delivery,
         // which several carriers were silently dropping. These are the entry point to the
         // whole app with no token yet, so they get the tightest buckets in the API: free SMS
@@ -165,6 +170,23 @@ public static class RateLimitingExtensions
                     {
                         PermitLimit = 5,
                         Window = TimeSpan.FromHours(1),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
+            });
+
+            // IMEI lookup: 10 per 15 minutes per account. Enough for typos; far too slow to enumerate IMEIs.
+            options.AddPolicy(Policies.DeviceLookup, httpContext =>
+            {
+                var uid = httpContext.User?.FindFirst("sub")?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "anonymous";
+
+                return RateLimitPartition.GetFixedWindowLimiter("imei-lookup:" + uid, _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(15),
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                         QueueLimit = 0
                     });
