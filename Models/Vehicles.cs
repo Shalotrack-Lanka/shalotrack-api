@@ -39,6 +39,16 @@ public class Vehicle
     public int? SpeedLimitKmh { get; set; }
     public int? IdleAlertMinutes { get; set; }
 
+    // Per-vehicle push on/off, set by the owner (Alert settings in the app and in Fleet). Off mutes only the PUSH,
+    // for the owner and every shared viewer; the alert is still saved and listed. SOS, geofence and idle alerts
+    // have no switch here (SOS is never mutable; the other two have their own on/off). Defaults are true, and the
+    // migration sets true on existing rows. No HasDefaultValue in the model on purpose: EF would then treat a
+    // stored "false" as "not set" on insert and write the database default (true) instead.
+    public bool PushPowerCut { get; set; } = true;
+    public bool PushIgnition { get; set; } = true;
+    public bool PushOverspeed { get; set; } = true;
+    public bool PushTrackerHealth { get; set; } = true;   // low battery and offline
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public Customer Customer { get; set; } = null!;

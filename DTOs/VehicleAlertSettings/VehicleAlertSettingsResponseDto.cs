@@ -10,6 +10,12 @@ public class VehicleAlertSettingsResponseDto
     /// <summary>The stored minutes, or the suggested default while idle alerts are off.</summary>
     public int IdleAlertMinutes { get; set; }
 
+    /// <summary>Push on/off for this vehicle (true = push). The alert is saved either way.</summary>
+    public bool PushPowerCut { get; set; }
+    public bool PushIgnition { get; set; }
+    public bool PushOverspeed { get; set; }
+    public bool PushTrackerHealth { get; set; }
+
     // Bounds, so every client (Fleet, Android, iOS) validates against the server's own rules.
     public int DefaultSpeedLimitKmh { get; set; }
     public int MinSpeedLimitKmh { get; set; }
