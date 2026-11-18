@@ -46,4 +46,14 @@ public class VehicleReminderRepository : IVehicleReminderRepository
     {
         _context.VehicleReminders.Remove(reminder);
     }
+
+    public Task<int> UpdateDueAsync(Guid reminderId, DateOnly dueDate, string? notes, DateTime updatedAtUtc)
+    {
+        return _context.VehicleReminders
+            .Where(r => r.ReminderId == reminderId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.DueDate, dueDate)
+                .SetProperty(r => r.Notes, notes)
+                .SetProperty(r => r.UpdatedAt, updatedAtUtc));
+    }
 }

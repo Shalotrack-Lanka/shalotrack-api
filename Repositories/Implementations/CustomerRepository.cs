@@ -194,4 +194,13 @@ public class CustomerRepository : ICustomerRepository
 
         return dashboard;
     }
+
+    public Task<int> SetWeeklySummaryAsync(Guid customerId, bool enabled, DateTime updatedAtUtc)
+    {
+        return _context.Customers
+            .Where(c => c.CustomerId == customerId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.WeeklySummaryEnabled, enabled)
+                .SetProperty(c => c.UpdatedAt, updatedAtUtc));
+    }
 }

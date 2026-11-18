@@ -42,13 +42,11 @@ public class WeeklySummarySettingsService : IWeeklySummarySettingsService
             return ApiResponse<WeeklySummarySettingsDto>.Fail(
                 (int)HttpStatusCode.Unauthorized, "Authentication required.", "No valid session found.");
 
-        // Tracked entity; plain change tracking writes only the changed columns.
-        customer.WeeklySummaryEnabled = dto.Enabled;
-        customer.UpdatedAt = DateTime.UtcNow;
-        await _unitOfWork.SaveChangesAsync();
+        // One UPDATE. The context is NoTracking, so setting the property and calling SaveChanges wrote nothing.
+        await _unitOfWork.Customers.SetWeeklySummaryAsync(customer.CustomerId, dto.Enabled, DateTime.UtcNow);
 
         return ApiResponse<WeeklySummarySettingsDto>.Ok(
-            new WeeklySummarySettingsDto { Enabled = customer.WeeklySummaryEnabled },
+            new WeeklySummarySettingsDto { Enabled = dto.Enabled },
             "Weekly summary setting saved.");
     }
 

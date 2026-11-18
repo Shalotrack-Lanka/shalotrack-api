@@ -63,10 +63,10 @@ public class VehicleAlertSettingsService : IVehicleAlertSettingsService
                 (int)HttpStatusCode.BadRequest, "Invalid idle time.",
                 $"Idle time must be between {AlertDefaults.MinIdleMinutes} and {AlertDefaults.MaxIdleMinutes} minutes.");
 
-        // Tracked entity. Deliberately NOT calling Vehicles.Update(): that marks the whole loaded
-        // graph (customer, assignments, device) as modified. With plain change tracking EF writes
-        // only the columns changed below.
-        var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
+        // The DbContext is NoTracking by default (DatabaseExtensions), so editing a loaded vehicle and calling
+        // SaveChanges wrote NOTHING: the reply showed the new values, a reload showed the old ones. The values
+        // are now written with one targeted UPDATE that also re-checks ownership in its WHERE clause.
+        var vehicle = await _unitOfWork.Vehicles.GetByIdForOwnershipCheckAsync(vehicleId);
         if (!Owns(customer, vehicle))
             return NotFound();
 
@@ -79,7 +79,12 @@ public class VehicleAlertSettingsService : IVehicleAlertSettingsService
         if (dto.PushTrackerHealth.HasValue) vehicle.PushTrackerHealth = dto.PushTrackerHealth.Value;
         vehicle.UpdatedAt = DateTime.UtcNow;
 
-        await _unitOfWork.SaveChangesAsync();
+        var changed = await _unitOfWork.Vehicles.UpdateAlertSettingsAsync(
+            vehicleId, customer.CustomerId, vehicle.SpeedLimitKmh, vehicle.IdleAlertMinutes,
+            vehicle.PushPowerCut, vehicle.PushIgnition, vehicle.PushOverspeed, vehicle.PushTrackerHealth,
+            vehicle.UpdatedAt);
+        if (changed != 1)
+            return NotFound();   // removed or transferred between the check and the write
         _provider.Invalidate(vehicleId);
 
         return ApiResponse<VehicleAlertSettingsResponseDto>.Ok(ToDto(vehicle), "Alert settings saved.");

@@ -94,9 +94,11 @@ public class VehicleReminderService : IVehicleReminderService
         }
         else
         {
+            // One UPDATE (NoTracking context: editing the loaded row and calling SaveChanges wrote nothing).
             reminder.DueDate = dto.DueDate;
             reminder.Notes = notes;
             reminder.UpdatedAt = now;
+            await _unitOfWork.VehicleReminders.UpdateDueAsync(reminder.ReminderId, dto.DueDate, notes, now);
         }
 
         await _unitOfWork.SaveChangesAsync();

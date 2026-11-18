@@ -33,4 +33,11 @@ public interface IAlertRepository
     /// One UPDATE statement; runs immediately, no SaveChanges. Returns how many rows changed.
     /// </summary>
     Task<int> MarkAllReadAsync(Guid customerId, Guid? vehicleId);
+
+    /// <summary>
+    /// Marks one alert as read, only if it is on the customer's own vehicle. One UPDATE, runs immediately
+    /// (the context is NoTracking, so editing a loaded alert and calling SaveChanges would write nothing).
+    /// Returns the number of rows changed (0 or 1).
+    /// </summary>
+    Task<int> MarkReadAsync(long alertId, Guid customerId);
 }

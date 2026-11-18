@@ -114,6 +114,21 @@ public class VehicleRepository : IVehicleRepository
         await _context.Vehicles.AddAsync(vehicle);
     }
 
+    public Task<int> UpdateAlertSettingsAsync(Guid vehicleId, Guid customerId, int? speedLimitKmh, int? idleAlertMinutes,
+        bool pushPowerCut, bool pushIgnition, bool pushOverspeed, bool pushTrackerHealth, DateTime updatedAtUtc)
+    {
+        return _context.Vehicles
+            .Where(v => v.VehicleId == vehicleId && v.CustomerId == customerId && v.IsActive && !v.IsDemoVehicle)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(v => v.SpeedLimitKmh, speedLimitKmh)
+                .SetProperty(v => v.IdleAlertMinutes, idleAlertMinutes)
+                .SetProperty(v => v.PushPowerCut, pushPowerCut)
+                .SetProperty(v => v.PushIgnition, pushIgnition)
+                .SetProperty(v => v.PushOverspeed, pushOverspeed)
+                .SetProperty(v => v.PushTrackerHealth, pushTrackerHealth)
+                .SetProperty(v => v.UpdatedAt, updatedAtUtc));
+    }
+
     public void Update(Vehicle vehicle)
     {
         _context.Vehicles.Update(vehicle);

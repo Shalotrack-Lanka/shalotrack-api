@@ -39,4 +39,13 @@ public class SavedPlaceRepository : ISavedPlaceRepository
     {
         _context.SavedPlaces.Remove(place);
     }
+
+    public Task<int> RecordVisitAsync(Guid placeId, DateTime visitedAtUtc)
+    {
+        return _context.SavedPlaces
+            .Where(p => p.PlaceId == placeId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.VisitCount, p => p.VisitCount + 1)
+                .SetProperty(p => p.LastVisitedAt, (DateTime?)visitedAtUtc));
+    }
 }

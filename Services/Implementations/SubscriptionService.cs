@@ -171,14 +171,26 @@ public class SubscriptionService : ISubscriptionService
                 $"This subscription is already '{subscription.Status}', not PendingPayment.");
         }
 
-        subscription.Status = SubscriptionStatus.Active;
-        subscription.StartDate = DateTime.UtcNow;
-        subscription.EndDate = DateTime.UtcNow.Add(GetDurationForPlan(subscription.Plan));
-        subscription.ConfirmedAt = DateTime.UtcNow;
+        // One conditional UPDATE. The context is NoTracking, so the old "set the fields; SaveChanges" wrote
+        // nothing: the plan stayed PendingPayment while the Free plan below WAS cancelled, leaving the customer
+        // with no active plan. The WHERE also stops a double confirm from re-dating an already active plan.
+        var now = DateTime.UtcNow;
+        var endDate = now.Add(GetDurationForPlan(subscription.Plan));
+        var activated = await _db.Subscriptions
+            .Where(s => s.SubscriptionId == subscriptionId && s.Status == SubscriptionStatus.PendingPayment)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(s => s.Status, SubscriptionStatus.Active)
+                .SetProperty(s => s.StartDate, (DateTime?)now)
+                .SetProperty(s => s.EndDate, (DateTime?)endDate)
+                .SetProperty(s => s.ConfirmedAt, (DateTime?)now));
+        if (activated != 1)
+        {
+            return ApiResponse<string>.Fail(
+                (int)HttpStatusCode.Conflict, "Not pending payment.", "This subscription was confirmed or changed meanwhile.");
+        }
 
-        await _unitOfWork.SaveChangesAsync();
-
-        // The paid plan replaces the customer's Free plan (one UPDATE; nothing to load).
+        // The paid plan replaces the customer's Free plan (one UPDATE; nothing to load). Only after activation
+        // succeeded, so a customer is never left without a plan.
         if (subscription.Plan != SubscriptionPlan.Free)
         {
             await _db.Subscriptions
