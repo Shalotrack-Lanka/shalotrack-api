@@ -13,6 +13,11 @@ public class GeofenceService : IGeofenceService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
 
+    // Every active geofence is checked against every position the vehicle reports, so the number a
+    // customer can create is capped. Generous for real use (homes, offices, depots, customer sites);
+    // stops a script from filling the table and slowing detection for everyone.
+    public const int MaxGeofencesPerCustomer = 200;
+
     public GeofenceService(IUnitOfWork unitOfWork, ICurrentUser currentUser)
     {
         _unitOfWork = unitOfWork;
@@ -96,6 +101,14 @@ public class GeofenceService : IGeofenceService
                 return ApiResponse<GeofenceResponseDto>.Fail(
                     (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{dto.VehicleId.Value}'.");
             }
+        }
+
+        if (await _unitOfWork.Geofences.CountByCustomerAsync(customer.CustomerId) >= MaxGeofencesPerCustomer)
+        {
+            return ApiResponse<GeofenceResponseDto>.Fail(
+                (int)HttpStatusCode.Conflict,
+                $"You can have up to {MaxGeofencesPerCustomer} geofences. Remove one you no longer need, then add this one.",
+                "Geofence limit reached.");
         }
 
         var geofence = new Geofence

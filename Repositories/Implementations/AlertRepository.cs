@@ -88,4 +88,21 @@ public class AlertRepository : IAlertRepository
             .OrderByDescending(a => a.TriggeredAt)
             .ToListAsync();
     }
+
+    public async Task<int> CountUnreadByCustomerAsync(Guid customerId)
+    {
+        return await _context.Alerts
+            .AsNoTracking()
+            .CountAsync(a => !a.IsRead && a.Vehicle.CustomerId == customerId);
+    }
+
+    public async Task<int> MarkAllReadAsync(Guid customerId, Guid? vehicleId)
+    {
+        var query = _context.Alerts.Where(a => !a.IsRead && a.Vehicle.CustomerId == customerId);
+        if (vehicleId.HasValue)
+        {
+            query = query.Where(a => a.VehicleId == vehicleId.Value);
+        }
+        return await query.ExecuteUpdateAsync(s => s.SetProperty(a => a.IsRead, true));
+    }
 }

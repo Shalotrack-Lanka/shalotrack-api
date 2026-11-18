@@ -55,6 +55,22 @@ public class PushNotificationService : IPushNotificationService
                 // block delivery to this customer's other registered devices.
                 _logger.LogWarning(ex, "Failed to send push to a token for customer {CustomerId}: {ErrorCode}",
                     customerId, ex.MessagingErrorCode);
+
+                // Firebase says this token will never work again (app uninstalled, or the app called
+                // deleteToken() on sign-out). Remove it so it is not retried on every alert forever.
+                // Deliberately NOT InvalidArgument: that can also mean a bad payload, and deleting a good
+                // token for that would silently stop the customer's alerts.
+                if (ex.MessagingErrorCode is MessagingErrorCode.Unregistered or MessagingErrorCode.SenderIdMismatch)
+                {
+                    try
+                    {
+                        await _unitOfWork.FcmTokens.DeleteByTokenAsync(token.FcmToken);
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        _logger.LogWarning(cleanupEx, "Could not remove a dead FCM token for customer {CustomerId}", customerId);
+                    }
+                }
             }
         }
     }

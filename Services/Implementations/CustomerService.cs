@@ -397,8 +397,62 @@ public class CustomerService : ICustomerService
             dashboard.OfflineVehicles = dashboard.VehicleCount - dashboard.OnlineVehicles;
         }
 
+        await ApplyConnectionRuleAsync(dashboard);
+
         return ApiResponse<DashboardResponseDto>.Ok(
             dashboard,
             "Dashboard retrieved successfully.");
+    }
+
+    /// <summary>
+    /// A tracker silent this long is offline even if the gateway still says connected (a gateway crash
+    /// never clears IsOnline). Same value as the Fleet portal's DeviceHealth::STALE_MINUTES, so a vehicle
+    /// shows the same state on the phone and on Fleet.
+    /// </summary>
+    private const int ConnectionStaleMinutes = 30;
+
+    /// <summary>
+    /// "Online" means the tracker is connected to the gateway, not "a location arrived recently".
+    /// Before: Online = location within 10 min, so a parked car whose tracker was connected and sending
+    /// heartbeats showed Offline, and the phone and Fleet disagreed.
+    /// Now: online = (gateway says connected, or has no status row yet) AND the latest of
+    /// heartbeat / last seen / last location is within 30 min.
+    /// Also: DeviceId now comes from the ACTIVE assignment. CurrentLocations keeps the old device's id
+    /// after an unlink, so an unlinked vehicle used to look like it still had a tracker.
+    /// </summary>
+    private async Task ApplyConnectionRuleAsync(DashboardResponseDto dashboard)
+    {
+        if (dashboard.Vehicles.Count == 0) return;
+
+        var connections = await _unitOfWork.Customers.GetVehicleConnectionsAsync(
+            dashboard.Vehicles.Select(v => v.VehicleId).Distinct().ToList());
+        var staleBefore = DateTime.UtcNow.AddMinutes(-ConnectionStaleMinutes);
+
+        foreach (var v in dashboard.Vehicles)
+        {
+            if (!connections.TryGetValue(v.VehicleId, out var c))
+            {
+                v.DeviceId = null;
+                v.Online = false;
+                continue;
+            }
+
+            v.DeviceId = c.DeviceId;
+            var lastContact = Latest(Latest(c.LastSeen, c.LastHeartbeat), v.LastUpdate);
+            var recent = lastContact.HasValue && lastContact.Value >= staleBefore;
+            v.Online = recent && (c.IsOnline ?? true);
+            v.PowerCut = c.PowerDisconnected;
+        }
+
+        dashboard.VehicleCount = dashboard.Vehicles.Count;
+        dashboard.OnlineVehicles = dashboard.Vehicles.Count(v => v.Online);
+        dashboard.OfflineVehicles = dashboard.VehicleCount - dashboard.OnlineVehicles;
+    }
+
+    private static DateTime? Latest(DateTime? a, DateTime? b)
+    {
+        if (!a.HasValue) return b;
+        if (!b.HasValue) return a;
+        return a.Value >= b.Value ? a : b;
     }
 }

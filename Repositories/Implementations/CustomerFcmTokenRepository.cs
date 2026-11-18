@@ -32,4 +32,19 @@ public class CustomerFcmTokenRepository : ICustomerFcmTokenRepository
     {
         await _context.CustomerFcmTokens.AddAsync(token);
     }
+
+    // ExecuteDeleteAsync runs immediately (no SaveChanges needed) and never loads the row.
+    public Task<int> DeleteForCustomerAsync(Guid customerId, string fcmToken)
+    {
+        return _context.CustomerFcmTokens
+            .Where(t => t.CustomerId == customerId && t.FcmToken == fcmToken)
+            .ExecuteDeleteAsync();
+    }
+
+    public Task<int> DeleteByTokenAsync(string fcmToken)
+    {
+        return _context.CustomerFcmTokens
+            .Where(t => t.FcmToken == fcmToken)
+            .ExecuteDeleteAsync();
+    }
 }

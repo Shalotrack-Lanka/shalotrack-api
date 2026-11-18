@@ -24,6 +24,11 @@ public class GeofenceRepository : IGeofenceRepository
             .ToListAsync();
     }
 
+    public async Task<int> CountByCustomerAsync(Guid customerId)
+    {
+        return await _context.Geofences.CountAsync(g => g.CustomerId == customerId);
+    }
+
     public async Task<Geofence?> GetByIdAsync(Guid geofenceId)
     {
         return await _context.Geofences
