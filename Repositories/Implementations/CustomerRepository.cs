@@ -110,6 +110,37 @@ public class CustomerRepository : ICustomerRepository
         _context.Customers.Remove(customer);
     }
 
+    public async Task<Dictionary<Guid, VehicleConnection>> GetVehicleConnectionsAsync(IReadOnlyCollection<Guid> vehicleIds)
+    {
+        if (vehicleIds.Count == 0) return new Dictionary<Guid, VehicleConnection>();
+
+        var ids = vehicleIds.ToList();
+        var rows = await (
+                from a in _context.DeviceAssignments.AsNoTracking()
+                where ids.Contains(a.VehicleId) && a.Status == ShaloTrack_API.Enums.AssignmentStatus.Active
+                join s in _context.DeviceStatuses.AsNoTracking() on a.DeviceId equals s.DeviceId into statuses
+                from s in statuses.DefaultIfEmpty()
+                select new
+                {
+                    a.VehicleId,
+                    a.DeviceId,
+                    IsOnline = s == null ? (bool?)null : s.IsOnline,
+                    LastSeen = s == null ? null : s.LastSeen,
+                    LastHeartbeat = s == null ? null : s.LastHeartbeat,
+                    PowerDisconnected = s != null && s.PowerStatus == ShaloTrack_API.Enums.PowerStatus.Disconnected
+                })
+            .ToListAsync();
+
+        // A vehicle has at most one active assignment (enforced by DeviceAssignmentService); if bad data
+        // ever has two, keep the first rather than throwing on a duplicate key.
+        var result = new Dictionary<Guid, VehicleConnection>();
+        foreach (var r in rows)
+        {
+            result.TryAdd(r.VehicleId, new VehicleConnection(r.DeviceId, r.IsOnline, r.LastSeen, r.LastHeartbeat, r.PowerDisconnected));
+        }
+        return result;
+    }
+
     public async Task<DashboardResponseDto?> GetDashboardAsync(Guid customerId)
     {
         // "Online" = device has reported within the last 10 minutes. The V5 device

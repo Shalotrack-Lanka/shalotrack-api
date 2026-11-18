@@ -68,6 +68,53 @@ public class AlertService : IAlertService
         return ApiResponse<string>.Ok("OK", "Alert marked as read.");
     }
 
+    public async Task<ApiResponse<int>> GetUnreadCountAsync()
+    {
+        var uid = _currentUser.FirebaseUid;
+        if (string.IsNullOrEmpty(uid))
+        {
+            return ApiResponse<int>.Fail((int)HttpStatusCode.Unauthorized, "Authentication required.", "No valid session found.");
+        }
+
+        var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(uid);
+        if (customer is null)
+        {
+            return ApiResponse<int>.Fail((int)HttpStatusCode.NotFound, "Profile not found.", "No customer profile exists for this account.");
+        }
+
+        var count = await _unitOfWork.Alerts.CountUnreadByCustomerAsync(customer.CustomerId);
+        return ApiResponse<int>.Ok(count, "Unread alerts counted.");
+    }
+
+    public async Task<ApiResponse<int>> MarkAllAsReadAsync(Guid? vehicleId)
+    {
+        var uid = _currentUser.FirebaseUid;
+        if (string.IsNullOrEmpty(uid))
+        {
+            return ApiResponse<int>.Fail((int)HttpStatusCode.Unauthorized, "Authentication required.", "No valid session found.");
+        }
+
+        var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(uid);
+        if (customer is null)
+        {
+            return ApiResponse<int>.Fail((int)HttpStatusCode.NotFound, "Profile not found.", "No customer profile exists for this account.");
+        }
+
+        // The UPDATE itself only touches alerts on the caller's own vehicles, so a vehicle id that is not
+        // theirs simply changes nothing. Checked anyway so the reply is an honest 404, same as elsewhere.
+        if (vehicleId.HasValue)
+        {
+            var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId.Value);
+            if (vehicle is null || vehicle.CustomerId != customer.CustomerId)
+            {
+                return ApiResponse<int>.Fail((int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{vehicleId.Value}'.");
+            }
+        }
+
+        var changed = await _unitOfWork.Alerts.MarkAllReadAsync(customer.CustomerId, vehicleId);
+        return ApiResponse<int>.Ok(changed, "Alerts marked as read.");
+    }
+
     public async Task<ApiResponse<string>> RegisterFcmTokenAsync(RegisterFcmTokenDto dto)
     {
         var uid = _currentUser.FirebaseUid;
@@ -85,9 +132,15 @@ public class AlertService : IAlertService
         var existing = await _unitOfWork.FcmTokens.GetByTokenAsync(dto.FcmToken);
         if (existing is not null)
         {
+            // SECURITY: an FCM token identifies the app install, not the person. When a second customer
+            // signs in on the same phone, the token must move to them. Before this fix the row kept the
+            // FIRST customer's id, so the new customer kept receiving the previous customer's vehicle
+            // alerts (vehicle number + alert type) and never received their own.
+            existing.CustomerId = customer.CustomerId;
+            existing.Platform = string.IsNullOrWhiteSpace(dto.Platform) ? existing.Platform : dto.Platform;
             existing.UpdatedAt = DateTime.UtcNow;
             await _unitOfWork.SaveChangesAsync();
-            return ApiResponse<string>.Ok("OK", "Token already registered, refreshed.");
+            return ApiResponse<string>.Ok("OK", "Token registered.");
         }
 
         var token = new CustomerFcmToken
@@ -101,7 +154,26 @@ public class AlertService : IAlertService
         await _unitOfWork.FcmTokens.AddAsync(token);
         await _unitOfWork.SaveChangesAsync();
 
-        return ApiResponse<string>.Ok("OK", "Token registered successfully.");
+        return ApiResponse<string>.Ok("OK", "Token registered.");
+    }
+
+    public async Task<ApiResponse<string>> UnregisterFcmTokenAsync(RegisterFcmTokenDto dto)
+    {
+        var uid = _currentUser.FirebaseUid;
+        if (string.IsNullOrEmpty(uid))
+        {
+            return ApiResponse<string>.Fail((int)HttpStatusCode.Unauthorized, "Authentication required.", "No valid session found.");
+        }
+
+        var customer = await _unitOfWork.Customers.GetByFirebaseUidAsync(uid);
+        if (customer is not null)
+        {
+            // Scoped to the caller: a customer can never delete another customer's token, even by guessing it.
+            await _unitOfWork.FcmTokens.DeleteForCustomerAsync(customer.CustomerId, dto.FcmToken);
+        }
+
+        // Same reply whether or not the token existed, so this endpoint can't be used to probe tokens.
+        return ApiResponse<string>.Ok("OK", "Token removed.");
     }
 
     public async Task<ApiResponse<AlertReportResponseDto>> GetAlertReportAsync(Guid vehicleId, DateTime from, DateTime to)

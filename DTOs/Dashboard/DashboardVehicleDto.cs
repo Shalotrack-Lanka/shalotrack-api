@@ -35,4 +35,9 @@ public class DashboardVehicleDto
     // for this specific vehicle, regardless of who the calling customer
     // actually is.
     public bool IsDemo { get; set; }
+
+    // NEW (18 Nov 2026) -- the tracker reports it is cut off from the vehicle's power (wires cut, battery
+    // disconnected or tampering). Same fact the Fleet health card shows as "Vehicle power: Disconnected";
+    // Android flags the vehicle's row with it. False when there is no tracker or no status yet.
+    public bool PowerCut { get; set; }
 }

@@ -24,4 +24,13 @@ public interface IAlertRepository
     /// GetByCustomerAsync's existing convention.
     /// </summary>
     Task<List<Alert>> GetByVehicleAndDateRangeAsync(Guid vehicleId, DateTime from, DateTime to);
+
+    /// <summary>Unread alerts on the customer's own vehicles (the app's Alerts badge). One COUNT query.</summary>
+    Task<int> CountUnreadByCustomerAsync(Guid customerId);
+
+    /// <summary>
+    /// Marks every unread alert on the customer's own vehicles as read (optionally one vehicle only).
+    /// One UPDATE statement; runs immediately, no SaveChanges. Returns how many rows changed.
+    /// </summary>
+    Task<int> MarkAllReadAsync(Guid customerId, Guid? vehicleId);
 }

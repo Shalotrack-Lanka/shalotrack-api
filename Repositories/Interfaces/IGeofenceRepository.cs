@@ -6,6 +6,9 @@ public interface IGeofenceRepository
 {
     Task<List<Geofence>> GetByCustomerAsync(Guid customerId);
 
+    // How many geofences this customer owns (all, active or not). Used for the per-customer cap.
+    Task<int> CountByCustomerAsync(Guid customerId);
+
     Task<Geofence?> GetByIdAsync(Guid geofenceId);
 
     // Used by the real-time detection listener -- returns only active

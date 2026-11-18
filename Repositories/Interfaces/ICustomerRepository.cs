@@ -17,4 +17,14 @@ public interface ICustomerRepository
     Task<int> CountActiveVehiclesAsync(Guid customerId);
     Task<Customer?> GetByPhoneNumberAsync(string phoneNumber);
     Task<DashboardResponseDto?> GetDashboardAsync(Guid customerId);
+
+    /// <summary>
+    /// For each vehicle with an ACTIVE device assignment: the device id and the gateway's connection
+    /// record (IsOnline, last seen, last heartbeat). One query for the whole list.
+    /// Vehicles with no active assignment are not in the result.
+    /// </summary>
+    Task<Dictionary<Guid, VehicleConnection>> GetVehicleConnectionsAsync(IReadOnlyCollection<Guid> vehicleIds);
 }
+
+/// <summary>Connection facts for one vehicle's active tracker. Status fields are null when the gateway has no status row yet.</summary>
+public sealed record VehicleConnection(Guid DeviceId, bool? IsOnline, DateTime? LastSeen, DateTime? LastHeartbeat, bool PowerDisconnected);
