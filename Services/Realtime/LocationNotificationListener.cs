@@ -629,6 +629,14 @@ public class LocationNotificationListener : BackgroundService
 
         foreach (var alert in alerts)
         {
+            // The owner can mute pushes per vehicle and alert type (Alert settings). The alert above is
+            // already saved, so a muted one still shows in the Alerts screen; only the phone stays quiet.
+            if (!AlertPushRules.ShouldPush(vehicle, alert.AlertType))
+            {
+                _logger.LogInformation("Push muted by the owner for {AlertType} on vehicle {VehicleId}; alert saved.", alert.AlertType, vehicleId);
+                continue;
+            }
+
             string title = $"{vehicle.VehicleNumber}: {alert.AlertType}";
 
             // FIX: this call was never wrapped -- if it throws for any

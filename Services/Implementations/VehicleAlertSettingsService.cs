@@ -10,7 +10,7 @@ using ShaloTrack_API.Services.Interfaces;
 namespace ShaloTrack_API.Services.Implementations;
 
 /// <summary>
-/// Owner-only read/write of a vehicle's speed limit and idle-alert threshold. Anything that is
+/// Owner-only read/write of a vehicle's speed limit, idle-alert threshold and push on/off switches. Anything that is
 /// not the caller's own, active, non-demo vehicle answers 404 (never 403), so IDs cannot be
 /// probed. Shared viewers receive the alerts but cannot change the thresholds.
 /// </summary>
@@ -65,13 +65,18 @@ public class VehicleAlertSettingsService : IVehicleAlertSettingsService
 
         // Tracked entity. Deliberately NOT calling Vehicles.Update(): that marks the whole loaded
         // graph (customer, assignments, device) as modified. With plain change tracking EF writes
-        // only the three columns changed below.
+        // only the columns changed below.
         var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(vehicleId);
         if (!Owns(customer, vehicle))
             return NotFound();
 
         vehicle!.SpeedLimitKmh = dto.SpeedLimitKmh == AlertDefaults.SpeedLimitKmh ? null : dto.SpeedLimitKmh;
         vehicle.IdleAlertMinutes = dto.IdleAlertEnabled ? dto.IdleAlertMinutes : null;
+        // Missing = unchanged (see UpdateVehicleAlertSettingsDto).
+        if (dto.PushPowerCut.HasValue) vehicle.PushPowerCut = dto.PushPowerCut.Value;
+        if (dto.PushIgnition.HasValue) vehicle.PushIgnition = dto.PushIgnition.Value;
+        if (dto.PushOverspeed.HasValue) vehicle.PushOverspeed = dto.PushOverspeed.Value;
+        if (dto.PushTrackerHealth.HasValue) vehicle.PushTrackerHealth = dto.PushTrackerHealth.Value;
         vehicle.UpdatedAt = DateTime.UtcNow;
 
         await _unitOfWork.SaveChangesAsync();
@@ -102,6 +107,10 @@ public class VehicleAlertSettingsService : IVehicleAlertSettingsService
         SpeedLimitKmh = v.SpeedLimitKmh ?? AlertDefaults.SpeedLimitKmh,
         IdleAlertEnabled = v.IdleAlertMinutes.HasValue,
         IdleAlertMinutes = v.IdleAlertMinutes ?? AlertDefaults.IdleMinutes,
+        PushPowerCut = v.PushPowerCut,
+        PushIgnition = v.PushIgnition,
+        PushOverspeed = v.PushOverspeed,
+        PushTrackerHealth = v.PushTrackerHealth,
         DefaultSpeedLimitKmh = AlertDefaults.SpeedLimitKmh,
         MinSpeedLimitKmh = AlertDefaults.MinSpeedLimitKmh,
         MaxSpeedLimitKmh = AlertDefaults.MaxSpeedLimitKmh,

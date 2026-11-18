@@ -47,7 +47,7 @@ public class DeviceOfflineNotifier : IDeviceOfflineNotifier
         _logger = logger;
     }
 
-    private sealed record Candidate(Guid DeviceId, Guid VehicleId, string VehicleNumber, Guid CustomerId, DateTime LastSeen);
+    private sealed record Candidate(Guid DeviceId, Guid VehicleId, string VehicleNumber, Guid CustomerId, DateTime LastSeen, bool Push);
 
     public async Task<DeviceOfflineRunResult> RunAsync(
         DateTime nowUtc, DeviceOfflineOptions options, bool dryRun, CancellationToken cancellationToken = default)
@@ -73,6 +73,7 @@ public class DeviceOfflineNotifier : IDeviceOfflineNotifier
                 v.VehicleNumber,
                 v.CustomerId,
                 LastSeen = s.LastSeen!.Value,
+                Push = v.PushTrackerHealth,   // the owner's "low battery and offline" push switch
             };
 
         var rows = await monitored
@@ -85,7 +86,7 @@ public class DeviceOfflineNotifier : IDeviceOfflineNotifier
             .ToListAsync(cancellationToken);
 
         var candidates = rows
-            .Select(r => new Candidate(r.DeviceId, r.VehicleId, r.VehicleNumber, r.CustomerId, r.LastSeen))
+            .Select(r => new Candidate(r.DeviceId, r.VehicleId, r.VehicleNumber, r.CustomerId, r.LastSeen, r.Push))
             .DistinctBy(c => c.DeviceId)
             .ToList();
 
@@ -167,6 +168,13 @@ public class DeviceOfflineNotifier : IDeviceOfflineNotifier
             _logger.LogError(ex, "DeviceOfflineNotifier: could not save the alert for device {DeviceId}.", c.DeviceId);
             _db.ChangeTracker.Clear();
             return false;
+        }
+
+        // Muted by the owner (Alert settings): the alert is saved and listed, the phones stay quiet.
+        if (!c.Push)
+        {
+            _logger.LogInformation("DeviceOfflineNotifier: push muted by the owner for vehicle {VehicleId}; alert saved.", c.VehicleId);
+            return true;
         }
 
         // The alert exists now; a push failure must not stop the other devices.

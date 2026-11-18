@@ -1107,6 +1107,18 @@ namespace ShaloTrack_API.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool>("PushIgnition")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("PushOverspeed")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("PushPowerCut")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("PushTrackerHealth")
+                        .HasColumnType("boolean");
+
                     b.Property<int?>("SpeedLimitKmh")
                         .HasColumnType("integer");
 

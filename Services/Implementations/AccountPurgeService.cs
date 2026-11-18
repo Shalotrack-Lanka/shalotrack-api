@@ -237,6 +237,10 @@ public class AccountPurgeService : IAccountPurgeService
                         .SetProperty(v => v.Color, (string?)null)
                         .SetProperty(v => v.SpeedLimitKmh, (int?)null)
                         .SetProperty(v => v.IdleAlertMinutes, (int?)null)
+                        .SetProperty(v => v.PushPowerCut, true)
+                        .SetProperty(v => v.PushIgnition, true)
+                        .SetProperty(v => v.PushOverspeed, true)
+                        .SetProperty(v => v.PushTrackerHealth, true)
                         .SetProperty(v => v.IsActive, false)
                         .SetProperty(v => v.UpdatedAt, nowUtc), ct);
             }

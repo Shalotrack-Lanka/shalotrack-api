@@ -59,6 +59,10 @@ public class AccountDataService : IAccountDataService
                 v.FuelType,
                 v.SpeedLimitKmh,
                 v.IdleAlertMinutes,
+                v.PushPowerCut,
+                v.PushIgnition,
+                v.PushOverspeed,
+                v.PushTrackerHealth,
                 v.CreatedAt,
                 Imei = v.DeviceAssignments
                     .Where(a => a.Status == Enums.AssignmentStatus.Active)
@@ -184,6 +188,10 @@ public class AccountDataService : IAccountDataService
                 FuelType = v.FuelType,
                 SpeedLimitKmh = v.SpeedLimitKmh ?? Constants.AlertDefaults.SpeedLimitKmh,
                 IdleAlertMinutes = v.IdleAlertMinutes,
+                PushPowerCut = v.PushPowerCut,
+                PushIgnition = v.PushIgnition,
+                PushOverspeed = v.PushOverspeed,
+                PushTrackerHealth = v.PushTrackerHealth,
                 DeviceImei = v.Imei,
                 DeviceBoundAt = v.BoundAt,
                 CreatedAt = v.CreatedAt,

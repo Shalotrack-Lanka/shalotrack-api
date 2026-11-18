@@ -53,6 +53,10 @@ public class ExportVehicleDto
     public string? FuelType { get; set; }
     public int SpeedLimitKmh { get; set; }
     public int? IdleAlertMinutes { get; set; }
+    public bool PushPowerCut { get; set; }
+    public bool PushIgnition { get; set; }
+    public bool PushOverspeed { get; set; }
+    public bool PushTrackerHealth { get; set; }
     public string? DeviceImei { get; set; }
     public DateTime? DeviceBoundAt { get; set; }
     public DateTime CreatedAt { get; set; }
