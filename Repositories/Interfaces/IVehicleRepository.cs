@@ -16,6 +16,14 @@ public interface IVehicleRepository
     /// </summary>
     Task<Vehicle?> GetByIdForOwnershipCheckAsync(Guid vehicleId);
 
+    /// <summary>
+    /// Writes a vehicle's alert settings in ONE UPDATE, only on the owner's own active, non-demo vehicle.
+    /// Runs immediately (no SaveChanges). The context uses NoTracking by default, so changing a loaded
+    /// entity and calling SaveChanges would write nothing. Returns the number of rows changed (0 or 1).
+    /// </summary>
+    Task<int> UpdateAlertSettingsAsync(Guid vehicleId, Guid customerId, int? speedLimitKmh, int? idleAlertMinutes,
+        bool pushPowerCut, bool pushIgnition, bool pushOverspeed, bool pushTrackerHealth, DateTime updatedAtUtc);
+
     Task<List<Vehicle>> GetByCustomerAsync(Guid customerId);
 
     Task<Vehicle?> GetByVehicleNumberAsync(string vehicleNumber);

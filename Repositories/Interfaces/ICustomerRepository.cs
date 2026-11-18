@@ -24,6 +24,9 @@ public interface ICustomerRepository
     /// Vehicles with no active assignment are not in the result.
     /// </summary>
     Task<Dictionary<Guid, VehicleConnection>> GetVehicleConnectionsAsync(IReadOnlyCollection<Guid> vehicleIds);
+
+    /// <summary>Sets the weekly summary switch. One UPDATE, runs immediately. (The context is NoTracking by default, so editing a loaded entity and calling SaveChanges writes nothing.) Returns rows changed.</summary>
+    Task<int> SetWeeklySummaryAsync(Guid customerId, bool enabled, DateTime updatedAtUtc);
 }
 
 /// <summary>Connection facts for one vehicle's active tracker. Status fields are null when the gateway has no status row yet.</summary>

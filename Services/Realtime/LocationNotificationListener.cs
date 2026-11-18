@@ -382,20 +382,16 @@ public class LocationNotificationListener : BackgroundService
             state.NearbyPlaceIds = currentlyNearby;
         }
 
+        // One UPDATE per newly entered place, incrementing in the database. (The old re-fetch was NOT tracked:
+        // the context is NoTracking by default, so VisitCount never went up.)
+        var visitedAt = DateTime.UtcNow;
         foreach (var placeId in newlyEnteredPlaceIds)
         {
-            // Re-fetched individually (tracked, unlike the AsNoTracking list
-            // above) so this update is safe to save directly.
-            var trackedPlace = await unitOfWork.SavedPlaces.GetByIdAsync(placeId);
-            if (trackedPlace is null) continue;
-
-            trackedPlace.VisitCount += 1;
-            trackedPlace.LastVisitedAt = DateTime.UtcNow;
+            await unitOfWork.SavedPlaces.RecordVisitAsync(placeId, visitedAt);
         }
 
         if (newlyEnteredPlaceIds.Count > 0)
         {
-            await unitOfWork.SaveChangesAsync();
             _logger.LogInformation(
                 "Recorded {Count} place visit(s) for vehicle {VehicleId}", newlyEnteredPlaceIds.Count, vehicleId);
         }

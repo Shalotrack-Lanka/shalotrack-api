@@ -105,4 +105,11 @@ public class AlertRepository : IAlertRepository
         }
         return await query.ExecuteUpdateAsync(s => s.SetProperty(a => a.IsRead, true));
     }
+
+    public Task<int> MarkReadAsync(long alertId, Guid customerId)
+    {
+        return _context.Alerts
+            .Where(a => a.AlertId == alertId && a.Vehicle.CustomerId == customerId)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.IsRead, true));
+    }
 }

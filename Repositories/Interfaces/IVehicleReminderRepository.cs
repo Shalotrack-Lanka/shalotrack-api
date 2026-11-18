@@ -15,4 +15,7 @@ public interface IVehicleReminderRepository
 
     Task AddAsync(VehicleReminder reminder);
     void Remove(VehicleReminder reminder);
+
+    /// <summary>Changes an existing reminder's date and notes. One UPDATE, runs immediately. (The context is NoTracking by default, so editing a loaded entity and calling SaveChanges writes nothing.)</summary>
+    Task<int> UpdateDueAsync(Guid reminderId, DateOnly dueDate, string? notes, DateTime updatedAtUtc);
 }

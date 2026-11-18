@@ -62,8 +62,9 @@ public class AlertService : IAlertService
             return ApiResponse<string>.Fail((int)HttpStatusCode.NotFound, "Alert not found.", $"No alert exists with ID '{alertId}'.");
         }
 
-        alert.IsRead = true;
-        await _unitOfWork.SaveChangesAsync();
+        // NoTracking context: setting alert.IsRead and calling SaveChanges wrote nothing (it came back unread
+        // after a refresh). One targeted UPDATE instead, scoped to the owner's vehicle.
+        await _unitOfWork.Alerts.MarkReadAsync(alertId, alert.Vehicle.CustomerId);
 
         return ApiResponse<string>.Ok("OK", "Alert marked as read.");
     }
@@ -136,10 +137,9 @@ public class AlertService : IAlertService
             // signs in on the same phone, the token must move to them. Before this fix the row kept the
             // FIRST customer's id, so the new customer kept receiving the previous customer's vehicle
             // alerts (vehicle number + alert type) and never received their own.
-            existing.CustomerId = customer.CustomerId;
-            existing.Platform = string.IsNullOrWhiteSpace(dto.Platform) ? existing.Platform : dto.Platform;
-            existing.UpdatedAt = DateTime.UtcNow;
-            await _unitOfWork.SaveChangesAsync();
+            // One UPDATE: the NoTracking context made the old "existing.CustomerId = ...; SaveChanges" a no-op,
+            // so the token never actually moved.
+            await _unitOfWork.FcmTokens.ReassignAsync(dto.FcmToken, customer.CustomerId, dto.Platform, DateTime.UtcNow);
             return ApiResponse<string>.Ok("OK", "Token registered.");
         }
 

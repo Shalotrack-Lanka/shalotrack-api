@@ -47,4 +47,17 @@ public class CustomerFcmTokenRepository : ICustomerFcmTokenRepository
             .Where(t => t.FcmToken == fcmToken)
             .ExecuteDeleteAsync();
     }
+
+    public Task<int> ReassignAsync(string fcmToken, Guid customerId, string? platform, DateTime updatedAtUtc)
+    {
+        var query = _context.CustomerFcmTokens.Where(t => t.FcmToken == fcmToken);
+        return string.IsNullOrWhiteSpace(platform)
+            ? query.ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.CustomerId, customerId)
+                .SetProperty(t => t.UpdatedAt, updatedAtUtc))
+            : query.ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.CustomerId, customerId)
+                .SetProperty(t => t.Platform, platform)
+                .SetProperty(t => t.UpdatedAt, updatedAtUtc));
+    }
 }

@@ -146,7 +146,18 @@ public class PhoneVerificationService : IPhoneVerificationService
             return ApiResponse<VerifyOtpResultDto>.Fail(400, genericFailureMessage);
         }
 
-        if (verification.AttemptCount >= MaxVerifyAttempts)
+        // The context is NoTracking (DatabaseExtensions): the old "AttemptCount += 1; SaveChanges" and
+        // "ConsumedAt = now; SaveChanges" wrote NOTHING, so the attempt cap never triggered and a used code
+        // stayed valid until it expired. Both are now single conditional UPDATEs, which also holds under
+        // parallel requests: an attempt is RESERVED in the database before the code is compared, so a burst
+        // of simultaneous guesses still gets at most MaxVerifyAttempts tries in total.
+        var verificationId = verification.PhoneVerificationId;
+        var reserved = await _db.PhoneVerifications
+            .Where(p => p.PhoneVerificationId == verificationId
+                && p.ConsumedAt == null
+                && p.AttemptCount < MaxVerifyAttempts)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.AttemptCount, p => p.AttemptCount + 1), cancellationToken);
+        if (reserved != 1)
         {
             _logger.LogWarning("OTP verify for {Phone}: attempt limit reached.", phoneNumber);
             return ApiResponse<VerifyOtpResultDto>.Fail(400, genericFailureMessage);
@@ -159,16 +170,21 @@ public class PhoneVerificationService : IPhoneVerificationService
 
         if (!matches)
         {
-            verification.AttemptCount += 1;
-            await _db.SaveChangesAsync(cancellationToken);
             _logger.LogWarning(
                 "OTP verify for {Phone}: wrong code, attempt {Attempt}/{Max}.",
-                phoneNumber, verification.AttemptCount, MaxVerifyAttempts);
+                phoneNumber, verification.AttemptCount + 1, MaxVerifyAttempts);
             return ApiResponse<VerifyOtpResultDto>.Fail(400, genericFailureMessage);
         }
 
-        verification.ConsumedAt = now;
-        await _db.SaveChangesAsync(cancellationToken);
+        // Spend the code: only one request can flip ConsumedAt from null; a parallel duplicate gets the generic failure.
+        var spent = await _db.PhoneVerifications
+            .Where(p => p.PhoneVerificationId == verificationId && p.ConsumedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.ConsumedAt, (DateTime?)now), cancellationToken);
+        if (spent != 1)
+        {
+            _logger.LogWarning("OTP verify for {Phone}: code already used.", phoneNumber);
+            return ApiResponse<VerifyOtpResultDto>.Fail(400, genericFailureMessage);
+        }
 
         var (uid, _) = await _firebaseUserAdmin.GetOrCreateUserByPhoneAsync(phoneNumber, cancellationToken);
         var customer = await _customerRepository.GetByFirebaseUidAsync(uid);
