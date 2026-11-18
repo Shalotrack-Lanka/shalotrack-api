@@ -55,9 +55,14 @@ public class SubscriptionService : ISubscriptionService
         // while one is already Active or PendingPayment; Expired/
         // Cancelled subscriptions don't block (a lapsed customer should
         // be able to renew).
+        //
+        // FIX (18 Nov 2026): a Free plan is Active with no end date, so under the old rule it blocked every
+        // paid request forever and no Free customer could ever upgrade. An Active Free plan now only blocks
+        // asking for Free again; it is cancelled when the paid plan's payment is confirmed.
         var existing = await _unitOfWork.Subscriptions.GetByCustomerAsync(customer.CustomerId);
         var blockingSubscription = existing.FirstOrDefault(s =>
-            s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.PendingPayment);
+            s.Status == SubscriptionStatus.PendingPayment
+            || (s.Status == SubscriptionStatus.Active && (s.Plan != SubscriptionPlan.Free || plan == SubscriptionPlan.Free)));
         if (blockingSubscription is not null)
         {
             return ApiResponse<SubscriptionResponseDto>.Fail(
@@ -172,6 +177,17 @@ public class SubscriptionService : ISubscriptionService
         subscription.ConfirmedAt = DateTime.UtcNow;
 
         await _unitOfWork.SaveChangesAsync();
+
+        // The paid plan replaces the customer's Free plan (one UPDATE; nothing to load).
+        if (subscription.Plan != SubscriptionPlan.Free)
+        {
+            await _db.Subscriptions
+                .Where(s => s.CustomerId == subscription.CustomerId
+                    && s.SubscriptionId != subscription.SubscriptionId
+                    && s.Plan == SubscriptionPlan.Free
+                    && s.Status == SubscriptionStatus.Active)
+                .ExecuteUpdateAsync(u => u.SetProperty(s => s.Status, SubscriptionStatus.Cancelled));
+        }
 
         return ApiResponse<string>.Ok("OK", "Payment confirmed, subscription activated.");
     }
