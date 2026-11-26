@@ -1210,13 +1210,18 @@ namespace ShaloTrack_API.Migrations
                     b.Property<DateTime>("InvitedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("InvitedPhoneNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<Guid>("OwnerCustomerId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime?>("RespondedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("SharedWithCustomerId")
+                    b.Property<Guid?>("SharedWithCustomerId")
                         .HasColumnType("uuid");
 
                     b.Property<int>("Status")
@@ -1226,6 +1231,8 @@ namespace ShaloTrack_API.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("ShareId");
+
+                    b.HasIndex("InvitedPhoneNumber");
 
                     b.HasIndex("OwnerCustomerId");
 
@@ -1529,8 +1536,7 @@ namespace ShaloTrack_API.Migrations
                     b.HasOne("ShaloTrack_API.Models.Customer", "SharedWithCustomer")
                         .WithMany()
                         .HasForeignKey("SharedWithCustomerId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ShaloTrack_API.Models.Vehicle", "Vehicle")
                         .WithMany()

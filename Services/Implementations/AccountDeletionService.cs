@@ -112,11 +112,20 @@ public class AccountDeletionService : IAccountDeletionService
                     .SetProperty(v => v.RespondedAt, (DateTime?)now));
 
             await _db.VehicleShares
-                .Where(v => v.SharedWithCustomerId == id
-                            && (v.Status == VehicleShareStatus.Pending || v.Status == VehicleShareStatus.Accepted))
+                .Where(v => v.SharedWithCustomerId == id && v.Status == VehicleShareStatus.Accepted)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(v => v.Status, VehicleShareStatus.Declined)
                     .SetProperty(v => v.RespondedAt, (DateTime?)now));
+
+            // Invites waiting for their number (pending invites are addressed to a number, not an account).
+            if (PhoneNumberNormalizer.TryNormalize(me.PhoneNumber, out var myE164))
+            {
+                await _db.VehicleShares
+                    .Where(v => v.InvitedPhoneNumber == myE164 && v.Status == VehicleShareStatus.Pending)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(v => v.Status, VehicleShareStatus.Declined)
+                        .SetProperty(v => v.RespondedAt, (DateTime?)now));
+            }
 
             await tx.CommitAsync();
         }
@@ -171,7 +180,7 @@ public class AccountDeletionService : IAccountDeletionService
 
         return await _db.Customers.AsNoTracking()
             .Where(c => c.FirebaseUid == uid && c.DeletedAt == null)
-            .Select(c => new MeRow(c.CustomerId, c.DeletionRequestedAt))
+            .Select(c => new MeRow(c.CustomerId, c.DeletionRequestedAt, c.PhoneNumber))
             .FirstOrDefaultAsync();
     }
 
@@ -197,5 +206,5 @@ public class AccountDeletionService : IAccountDeletionService
         ApiResponse<DeletionStatusDto>.Fail(
             (int)HttpStatusCode.Unauthorized, "Authentication required.", "No valid session found.");
 
-    private sealed record MeRow(Guid CustomerId, DateTime? DeletionRequestedAt);
+    private sealed record MeRow(Guid CustomerId, DateTime? DeletionRequestedAt, string PhoneNumber);
 }

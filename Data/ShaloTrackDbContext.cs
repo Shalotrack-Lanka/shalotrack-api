@@ -243,6 +243,15 @@ public class ShaloTrackDbContext : DbContext
             .HasForeignKey(s => s.SharedWithCustomerId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Invites are addressed to a phone number; the recipient's Sharing screen looks them up by it.
+        modelBuilder.Entity<VehicleShare>()
+            .Property(s => s.InvitedPhoneNumber)
+            .HasMaxLength(20)
+            .IsRequired();
+
+        modelBuilder.Entity<VehicleShare>()
+            .HasIndex(s => s.InvitedPhoneNumber);
+
         // Complaints. Same multi-path risk as VehicleShare above, just
         // one level removed: Complaint.CustomerId is a direct FK to
         // Customer, but Complaint.VehicleId also leads back to Customer

@@ -43,6 +43,10 @@ public static class RateLimitingExtensions
         // a model's IMEI range and find unlinked trackers. A real customer looks up one or two.
         public const string DeviceLookup = "device_lookup";
 
+        // Sharing a vehicle by mobile number. The reply no longer says whether a number has an account, but each
+        // invite still sends a push to a real person and creates a row, so it is capped per account.
+        public const string ShareInvite = "share_invite";
+
         // Custom OTP auth (2026-10-27) -- replaces Firebase Phone Auth's own SMS delivery,
         // which several carriers were silently dropping. These are the entry point to the
         // whole app with no token yet, so they get the tightest buckets in the API: free SMS
@@ -187,6 +191,23 @@ public static class RateLimitingExtensions
                     {
                         PermitLimit = 10,
                         Window = TimeSpan.FromMinutes(15),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
+            });
+
+            // Share invites: 10 per hour per account. A family shares with a few people; a script gets nowhere.
+            options.AddPolicy(Policies.ShareInvite, httpContext =>
+            {
+                var uid = httpContext.User?.FindFirst("sub")?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "anonymous";
+
+                return RateLimitPartition.GetFixedWindowLimiter("share-invite:" + uid, _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromHours(1),
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                         QueueLimit = 0
                     });

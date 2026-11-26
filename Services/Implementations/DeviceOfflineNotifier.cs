@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using ShaloTrack_API.Data;
 using ShaloTrack_API.Enums;
 using ShaloTrack_API.Models;
@@ -183,8 +183,8 @@ public class DeviceOfflineNotifier : IDeviceOfflineNotifier
         {
             var viewers = await _db.VehicleShares
                 .AsNoTracking()
-                .Where(s => s.VehicleId == c.VehicleId && s.Status == VehicleShareStatus.Accepted)
-                .Select(s => s.SharedWithCustomerId)
+                .Where(s => s.VehicleId == c.VehicleId && s.Status == VehicleShareStatus.Accepted && s.SharedWithCustomerId != null)
+                .Select(s => s.SharedWithCustomerId!.Value)
                 .ToListAsync(cancellationToken);
             recipients.AddRange(viewers);
         }

@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using ShaloTrack_API.Auth;
 using ShaloTrack_API.DTOs.VehicleShare;
+using ShaloTrack_API.Extensions;
 using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Controllers;
@@ -21,7 +23,9 @@ public class VehicleSharesController : ControllerBase
     }
 
     // POST /api/VehicleShares/invite
+    // The same reply whether or not the number has a ShaloTrack account (see VehicleShareService).
     [HttpPost("invite")]
+    [EnableRateLimiting(RateLimitingExtensions.Policies.ShareInvite)]
     public async Task<IActionResult> Invite([FromBody] InviteVehicleShareDto dto)
     {
         var response = await _vehicleShareService.InviteAsync(_currentUser.FirebaseUid!, dto);
