@@ -9,16 +9,34 @@ using ShaloTrack_API.Services.Interfaces;
 
 namespace ShaloTrack_API.Services.Implementations;
 
+/// <summary>
+/// Sharing a vehicle with another person, by their mobile number.
+///
+/// Privacy rule: an invite never tells the inviter whether the number has a ShaloTrack account. The reply,
+/// the status code, the work done before replying and the owner's list are the same either way, and the
+/// recipient's name is shown to the owner only after the recipient accepts. Without this, the invite form
+/// answers "does this number use ShaloTrack, and what is that person's name?" for any number typed into it.
+/// </summary>
 public class VehicleShareService : IVehicleShareService
 {
-    private readonly IUnitOfWork _unitOfWork;
-    private readonly IPushNotificationService _pushNotificationService;
+    /// <summary>Live pending invites one owner may have at once. Bounds rows created by invites to numbers
+    /// nobody uses; a real family shares with a handful of people.</summary>
+    public const int MaxPendingInvitesPerOwner = 20;
 
-    public VehicleShareService(IUnitOfWork unitOfWork, IPushNotificationService pushNotificationService)
+    public const string InviteSentMessage = "Invite sent. If this number uses ShaloTrack, they'll see it in Sharing.";
+
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<VehicleShareService> _logger;
+
+    public VehicleShareService(IUnitOfWork unitOfWork, IServiceScopeFactory scopeFactory, ILogger<VehicleShareService> logger)
     {
         _unitOfWork = unitOfWork;
-        _pushNotificationService = pushNotificationService;
+        _scopeFactory = scopeFactory;
+        _logger = logger;
     }
+
+    private static DateTime PendingSince(DateTime now) => now - VehicleShare.PendingLifetime;
 
     public async Task<ApiResponse<VehicleShareResponseDto>> InviteAsync(string ownerFirebaseUid, InviteVehicleShareDto dto)
     {
@@ -36,82 +54,91 @@ public class VehicleShareService : IVehicleShareService
         }
 
         var vehicle = await _unitOfWork.Vehicles.GetByIdAsync(dto.VehicleId);
-        if (vehicle is null || vehicle.CustomerId != owner.CustomerId)
+        if (vehicle is null || vehicle.CustomerId != owner.CustomerId || !vehicle.IsActive)
         {
             return ApiResponse<VehicleShareResponseDto>.Fail(
-                (int)HttpStatusCode.NotFound, "Vehicle not found.", $"No vehicle exists with ID '{dto.VehicleId}'.");
+                (int)HttpStatusCode.NotFound, "Vehicle not found.", "No vehicle with this ID belongs to this account.");
         }
 
-        var sharedWith = await _unitOfWork.Customers.GetByPhoneNumberAsync(dto.PhoneNumber);
-        if (sharedWith is null)
+        // Format only: says nothing about accounts.
+        if (!PhoneNumberNormalizer.TryNormalize(dto.PhoneNumber, out var invitedE164))
         {
             return ApiResponse<VehicleShareResponseDto>.Fail(
-                (int)HttpStatusCode.NotFound, "No account found for that number.",
-                "The person you're inviting needs to have the ShaloTrack app installed and registered with this phone number first.");
+                (int)HttpStatusCode.BadRequest, "Enter a Sri Lankan mobile number, for example 077 123 4567.", "");
         }
 
-        if (sharedWith.CustomerId == owner.CustomerId)
+        // The owner knows their own number, so this reveals nothing.
+        if (PhoneNumberNormalizer.TryNormalize(owner.PhoneNumber, out var ownerE164) && ownerE164 == invitedE164)
         {
             return ApiResponse<VehicleShareResponseDto>.Fail(
-                (int)HttpStatusCode.BadRequest, "You can't share a vehicle with yourself.", "");
+                (int)HttpStatusCode.BadRequest, "That's your own number.", "");
         }
 
-        var existing = await _unitOfWork.VehicleShares.GetByVehicleAndSharedWithAsync(dto.VehicleId, sharedWith.CustomerId);
-        if (existing is not null)
+        var now = DateTime.UtcNow;
+        var pendingSince = PendingSince(now);
+
+        // Always looked up, whether or not it is used below, so both paths do the same work.
+        var holder = await _unitOfWork.Customers.GetByPhoneNumberAsync(invitedE164);
+        if (holder is not null && holder.CustomerId == owner.CustomerId) holder = null;
+
+        // Only matches rows the owner already sees in their own list (their pending invite to this number, or a
+        // person who accepted), so refusing a duplicate tells them nothing new.
+        if (await _unitOfWork.VehicleShares.HasActiveShareAsync(vehicle.VehicleId, invitedE164, holder?.CustomerId, pendingSince))
         {
             return ApiResponse<VehicleShareResponseDto>.Fail(
-                (int)HttpStatusCode.Conflict, "Already shared with this person.",
-                existing.Status == VehicleShareStatus.Pending
-                    ? "There's already a pending invite for this person on this vehicle."
-                    : "This vehicle is already shared with this person.");
+                (int)HttpStatusCode.Conflict, "You've already shared this vehicle with this number.",
+                "There is a pending invite or an accepted share for this number on this vehicle.");
+        }
+
+        if (await _unitOfWork.VehicleShares.CountPendingInvitesAsync(owner.CustomerId, pendingSince) >= MaxPendingInvitesPerOwner)
+        {
+            return ApiResponse<VehicleShareResponseDto>.Fail(
+                (int)HttpStatusCode.Conflict, $"You have {MaxPendingInvitesPerOwner} invites waiting. Cancel some before sending more.", "");
         }
 
         var share = new VehicleShare
         {
             ShareId = Guid.NewGuid(),
-            VehicleId = dto.VehicleId,
+            VehicleId = vehicle.VehicleId,
             OwnerCustomerId = owner.CustomerId,
-            SharedWithCustomerId = sharedWith.CustomerId,
+            InvitedPhoneNumber = invitedE164,
+            SharedWithCustomerId = null,
             Status = VehicleShareStatus.Pending,
-            InvitedAt = DateTime.UtcNow
+            InvitedAt = now
         };
 
         await _unitOfWork.VehicleShares.AddAsync(share);
         await _unitOfWork.SaveChangesAsync();
 
-        // Best-effort -- a failed push shouldn't undo an already-created
-        // invite. Same lesson learned from the real SOS 500 investigation:
-        // never let a notification failure mask a successful core action.
-        try
+        // Sent after the reply is decided and off the request path, so how long the request takes doesn't
+        // reveal whether there was anyone to notify.
+        if (holder is not null)
         {
-            await _pushNotificationService.SendAlertPushAsync(
-                sharedWith.CustomerId,
-                "Vehicle share invite",
-                $"{owner.FullName} wants to share {vehicle.VehicleNumber} with you.");
-        }
-        catch (Exception)
-        {
-            // Logged inside SendAlertPushAsync itself already -- the
-            // invite still succeeded and is visible next time they open
-            // the app regardless of whether the push landed.
+            QueueInvitePush(holder.CustomerId, owner.FullName, vehicle.VehicleNumber);
         }
 
-        var responseDto = new VehicleShareResponseDto
-        {
-            ShareId = share.ShareId,
-            Status = share.Status.ToString(),
-            InvitedAt = share.InvitedAt,
-            RespondedAt = share.RespondedAt,
-            VehicleId = vehicle.VehicleId,
-            VehicleNumber = vehicle.VehicleNumber,
-            Make = vehicle.Make,
-            Model = vehicle.Model,
-            OtherPartyCustomerId = sharedWith.CustomerId,
-            OtherPartyName = sharedWith.FullName,
-            OtherPartyPhoneNumber = sharedWith.PhoneNumber
-        };
+        return ApiResponse<VehicleShareResponseDto>.Ok(ToOwnerDto(share, vehicle.VehicleNumber, vehicle.Make, vehicle.Model, now), InviteSentMessage);
+    }
 
-        return ApiResponse<VehicleShareResponseDto>.Ok(responseDto, "Invite sent.");
+    private void QueueInvitePush(Guid recipientCustomerId, string ownerName, string vehicleNumber)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var push = scope.ServiceProvider.GetRequiredService<IPushNotificationService>();
+                await push.SendAlertPushAsync(
+                    recipientCustomerId,
+                    "Vehicle share invite",
+                    $"{ownerName} wants to share {vehicleNumber} with you.");
+            }
+            catch (Exception ex)
+            {
+                // Best effort: the invite is saved and shows in the recipient's Sharing screen either way.
+                _logger.LogWarning(ex, "Share invite push failed for customer {CustomerId}.", recipientCustomerId);
+            }
+        });
     }
 
     public async Task<ApiResponse<string>> RespondAsync(string responderFirebaseUid, Guid shareId, RespondToVehicleShareDto dto)
@@ -129,34 +156,36 @@ public class VehicleShareService : IVehicleShareService
                 (int)HttpStatusCode.NotFound, "Profile not found.", "No customer profile exists for this account.");
         }
 
+        var now = DateTime.UtcNow;
+        var changed = PhoneNumberNormalizer.TryNormalize(responder.PhoneNumber, out var responderE164)
+            ? await _unitOfWork.VehicleShares.RespondAsync(shareId, responder.CustomerId, responderE164, dto.Accept, PendingSince(now), now)
+            : 0;
+
+        if (changed == 0)
+        {
+            // Same reply for "not yours", "already answered", "expired" and "cancelled by the owner".
+            return ApiResponse<string>.Fail(
+                (int)HttpStatusCode.NotFound, "This invite is no longer available.",
+                "It may have been answered, cancelled by the owner, or expired.");
+        }
+
         var share = await _unitOfWork.VehicleShares.GetByIdAsync(shareId);
-        if (share is null || share.SharedWithCustomerId != responder.CustomerId)
+        if (share is not null)
         {
-            return ApiResponse<string>.Fail(
-                (int)HttpStatusCode.NotFound, "Invite not found.", $"No pending invite exists with ID '{shareId}' for this account.");
-        }
-
-        if (share.Status != VehicleShareStatus.Pending)
-        {
-            return ApiResponse<string>.Fail(
-                (int)HttpStatusCode.Conflict, "This invite has already been responded to.", $"Current status: {share.Status}.");
-        }
-
-        share.Status = dto.Accept ? VehicleShareStatus.Accepted : VehicleShareStatus.Declined;
-        share.RespondedAt = DateTime.UtcNow;
-        _unitOfWork.VehicleShares.Update(share); // Required: DbContext is NoTracking globally — attach & mark Modified before save
-        await _unitOfWork.SaveChangesAsync();
-
-        try
-        {
-            await _pushNotificationService.SendAlertPushAsync(
-                share.OwnerCustomerId,
-                "Vehicle share update",
-                $"{responder.FullName} {(dto.Accept ? "accepted" : "declined")} your share invite for {share.Vehicle.VehicleNumber}.");
-        }
-        catch (Exception)
-        {
-            // Same reasoning as InviteAsync -- the response itself already succeeded.
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var push = scope.ServiceProvider.GetRequiredService<IPushNotificationService>();
+                await push.SendAlertPushAsync(
+                    share.OwnerCustomerId,
+                    "Vehicle share update",
+                    $"{responder.FullName} {(dto.Accept ? "accepted" : "declined")} your share invite for {share.Vehicle.VehicleNumber}.");
+            }
+            catch (Exception ex)
+            {
+                // The answer itself is saved; the push is best effort.
+                _logger.LogWarning(ex, "Share response push failed for owner {CustomerId}.", share.OwnerCustomerId);
+            }
         }
 
         return ApiResponse<string>.Ok("OK", dto.Accept ? "Invite accepted." : "Invite declined.");
@@ -177,17 +206,12 @@ public class VehicleShareService : IVehicleShareService
                 (int)HttpStatusCode.NotFound, "Profile not found.", "No customer profile exists for this account.");
         }
 
-        var share = await _unitOfWork.VehicleShares.GetByIdAsync(shareId);
-        if (share is null || share.OwnerCustomerId != owner.CustomerId)
+        var changed = await _unitOfWork.VehicleShares.RevokeAsync(shareId, owner.CustomerId, DateTime.UtcNow);
+        if (changed == 0)
         {
             return ApiResponse<string>.Fail(
-                (int)HttpStatusCode.NotFound, "Share not found.", $"No share exists with ID '{shareId}' owned by this account.");
+                (int)HttpStatusCode.NotFound, "Share not found.", "No active share or pending invite with this ID belongs to this account.");
         }
-
-        share.Status = VehicleShareStatus.Revoked;
-        share.RespondedAt = DateTime.UtcNow;
-        _unitOfWork.VehicleShares.Update(share); // Required: DbContext is NoTracking globally — attach & mark Modified before save
-        await _unitOfWork.SaveChangesAsync();
 
         return ApiResponse<string>.Ok("OK", "Share revoked.");
     }
@@ -207,8 +231,9 @@ public class VehicleShareService : IVehicleShareService
                 (int)HttpStatusCode.NotFound, "Profile not found.", "No customer profile exists for this account.");
         }
 
+        var now = DateTime.UtcNow;
         var shares = await _unitOfWork.VehicleShares.GetOwnedSharesAsync(owner.CustomerId, vehicleId);
-        var dtos = shares.Select(s => MapToDto(s, viewedByOwner: true)).ToList();
+        var dtos = shares.Select(s => ToOwnerDto(s, s.Vehicle.VehicleNumber, s.Vehicle.Make, s.Vehicle.Model, now)).ToList();
         return ApiResponse<List<VehicleShareResponseDto>>.Ok(dtos, "Shares retrieved.");
     }
 
@@ -228,7 +253,7 @@ public class VehicleShareService : IVehicleShareService
         }
 
         var shares = await _unitOfWork.VehicleShares.GetSharedWithMeAsync(viewer.CustomerId);
-        var dtos = shares.Select(s => MapToDto(s, viewedByOwner: false)).ToList();
+        var dtos = shares.Select(ToRecipientDto).ToList();
         return ApiResponse<List<VehicleShareResponseDto>>.Ok(dtos, "Shared vehicles retrieved.");
     }
 
@@ -247,30 +272,54 @@ public class VehicleShareService : IVehicleShareService
                 (int)HttpStatusCode.NotFound, "Profile not found.", "No customer profile exists for this account.");
         }
 
-        var shares = await _unitOfWork.VehicleShares.GetPendingInvitesForAsync(viewer.CustomerId);
-        var dtos = shares.Select(s => MapToDto(s, viewedByOwner: false)).ToList();
+        if (!PhoneNumberNormalizer.TryNormalize(viewer.PhoneNumber, out var viewerE164))
+        {
+            return ApiResponse<List<VehicleShareResponseDto>>.Ok(new List<VehicleShareResponseDto>(), "Pending invites retrieved.");
+        }
+
+        var shares = await _unitOfWork.VehicleShares.GetPendingInvitesForAsync(viewer.CustomerId, viewerE164, PendingSince(DateTime.UtcNow));
+        var dtos = shares.Select(ToRecipientDto).ToList();
         return ApiResponse<List<VehicleShareResponseDto>>.Ok(dtos, "Pending invites retrieved.");
     }
 
-    // viewedByOwner determines which side's details populate "OtherParty" --
-    // the owner sees the shared-with person's info, the shared-with person
-    // sees the owner's info.
-    private static VehicleShareResponseDto MapToDto(VehicleShare share, bool viewedByOwner)
+    /// <summary>
+    /// The owner's view. The other person's name and current number appear only once they have accepted;
+    /// before that the owner sees just the number they typed, so the list can't be used to look people up.
+    /// A pending invite past its lifetime is reported as "Expired".
+    /// </summary>
+    private static VehicleShareResponseDto ToOwnerDto(VehicleShare share, string vehicleNumber, string make, string model, DateTime now)
     {
-        var otherParty = viewedByOwner ? share.SharedWithCustomer : share.OwnerCustomer;
+        var accepted = share.Status == VehicleShareStatus.Accepted && share.SharedWithCustomer is not null;
+        var expired = share.Status == VehicleShareStatus.Pending && share.InvitedAt < PendingSince(now);
         return new VehicleShareResponseDto
         {
             ShareId = share.ShareId,
-            Status = share.Status.ToString(),
+            Status = expired ? "Expired" : share.Status.ToString(),
             InvitedAt = share.InvitedAt,
             RespondedAt = share.RespondedAt,
             VehicleId = share.VehicleId,
-            VehicleNumber = share.Vehicle.VehicleNumber,
-            Make = share.Vehicle.Make,
-            Model = share.Vehicle.Model,
-            OtherPartyCustomerId = otherParty.CustomerId,
-            OtherPartyName = otherParty.FullName,
-            OtherPartyPhoneNumber = otherParty.PhoneNumber
+            VehicleNumber = vehicleNumber,
+            Make = make,
+            Model = model,
+            OtherPartyCustomerId = accepted ? share.SharedWithCustomer!.CustomerId : Guid.Empty,
+            OtherPartyName = accepted ? share.SharedWithCustomer!.FullName : string.Empty,
+            OtherPartyPhoneNumber = accepted ? share.SharedWithCustomer!.PhoneNumber : share.InvitedPhoneNumber
         };
     }
+
+    /// <summary>The recipient's view: who is sharing with them (the owner chose to contact them).</summary>
+    private static VehicleShareResponseDto ToRecipientDto(VehicleShare share) => new()
+    {
+        ShareId = share.ShareId,
+        Status = share.Status.ToString(),
+        InvitedAt = share.InvitedAt,
+        RespondedAt = share.RespondedAt,
+        VehicleId = share.VehicleId,
+        VehicleNumber = share.Vehicle.VehicleNumber,
+        Make = share.Vehicle.Make,
+        Model = share.Vehicle.Model,
+        OtherPartyCustomerId = share.OwnerCustomer.CustomerId,
+        OtherPartyName = share.OwnerCustomer.FullName,
+        OtherPartyPhoneNumber = share.OwnerCustomer.PhoneNumber
+    };
 }

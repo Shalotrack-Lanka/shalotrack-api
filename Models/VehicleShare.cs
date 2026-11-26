@@ -19,16 +19,23 @@ public class VehicleShare
     public Guid OwnerCustomerId { get; set; }
     public Customer OwnerCustomer { get; set; } = null!;
 
-    // Resolved directly at invite time -- the owner invites by phone
-    // number, and since sharing requires the other person to already
-    // have the app installed, a matching Customer is looked up and
-    // linked immediately rather than storing an unresolved phone number
-    // and reconciling it later.
-    public Guid SharedWithCustomerId { get; set; }
-    public Customer SharedWithCustomer { get; set; } = null!;
+    // The number the owner typed, as E.164 (+947XXXXXXXX). An invite is addressed to a NUMBER, not to an account:
+    // the inviter is never told whether that number has a ShaloTrack account (that answer would let anyone check
+    // any number), so a pending invite may point at a number nobody has registered yet. Whoever signs in with
+    // this number sees the invite in Sharing. Max 20 (DbContext).
+    public string InvitedPhoneNumber { get; set; } = string.Empty;
+
+    // Set when the invite is accepted: the customer who accepted it. Null while Pending or Declined (and for an
+    // expired invite), because until then there is no confirmed person, only a number.
+    public Guid? SharedWithCustomerId { get; set; }
+    public Customer? SharedWithCustomer { get; set; }
 
     public VehicleShareStatus Status { get; set; } = VehicleShareStatus.Pending;
 
     public DateTime InvitedAt { get; set; }
     public DateTime? RespondedAt { get; set; }
+
+    /// <summary>A pending invite stops being offered after this long, so a number that later changes hands
+    /// (operators recycle numbers) doesn't inherit someone else's invite.</summary>
+    public static readonly TimeSpan PendingLifetime = TimeSpan.FromDays(14);
 }

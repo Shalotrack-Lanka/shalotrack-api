@@ -167,10 +167,11 @@ public class SOSService : ISOSService
         var acceptedShares = await _unitOfWork.VehicleShares.GetAcceptedSharesForVehicleAsync(vehicleId);
         foreach (var share in acceptedShares)
         {
+            if (share.SharedWithCustomerId is not Guid viewerId) continue;
             try
             {
                 await _pushNotificationService.SendAlertPushAsync(
-                    share.SharedWithCustomerId,
+                    viewerId,
                     "SOS Alert",
                     $"Emergency alert triggered for {vehicle.VehicleNumber}.");
             }

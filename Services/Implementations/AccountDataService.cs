@@ -107,7 +107,7 @@ public class AccountDataService : IAccountDataService
 
         var sharesGiven = await _db.VehicleShares.AsNoTracking()
             .Where(s => s.OwnerCustomerId == id)
-            .Select(s => new { s.VehicleId, s.SharedWithCustomer.PhoneNumber, s.Status, s.InvitedAt, s.RespondedAt })
+            .Select(s => new { s.VehicleId, PhoneNumber = s.InvitedPhoneNumber, s.Status, s.InvitedAt, s.RespondedAt })
             .ToListAsync();
 
         var sharesReceived = await _db.VehicleShares.AsNoTracking()

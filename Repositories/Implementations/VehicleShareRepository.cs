@@ -20,17 +20,6 @@ public class VehicleShareRepository : IVehicleShareRepository
         await _context.VehicleShares.AddAsync(share);
     }
 
-    /// <summary>
-    /// Attaches the entity and marks all scalar properties as Modified so
-    /// SaveChangesAsync generates an UPDATE.  Call this before SaveChangesAsync
-    /// whenever you mutate a share fetched via any query method, because the
-    /// DbContext is configured with QueryTrackingBehavior.NoTracking globally.
-    /// </summary>
-    public void Update(VehicleShare share)
-    {
-        _context.VehicleShares.Update(share);
-    }
-
     public async Task<VehicleShare?> GetByIdAsync(Guid shareId)
     {
         return await _context.VehicleShares
@@ -42,11 +31,60 @@ public class VehicleShareRepository : IVehicleShareRepository
 
     public async Task<VehicleShare?> GetByVehicleAndSharedWithAsync(Guid vehicleId, Guid sharedWithCustomerId)
     {
+        // Only an ACCEPTED share links a person to a vehicle. Pending invites are addressed to a phone number
+        // and have no SharedWithCustomerId until they are accepted.
         return await _context.VehicleShares
             .FirstOrDefaultAsync(s => s.VehicleId == vehicleId
                 && s.SharedWithCustomerId == sharedWithCustomerId
-                && s.Status != VehicleShareStatus.Revoked
-                && s.Status != VehicleShareStatus.Declined);
+                && s.Status == VehicleShareStatus.Accepted);
+    }
+
+    public async Task<bool> HasActiveShareAsync(Guid vehicleId, string invitedE164, Guid? currentHolderCustomerId, DateTime pendingSince)
+    {
+        return await _context.VehicleShares.AnyAsync(s => s.VehicleId == vehicleId
+            && ((s.Status == VehicleShareStatus.Pending && s.InvitedAt >= pendingSince && s.InvitedPhoneNumber == invitedE164)
+                || (s.Status == VehicleShareStatus.Accepted
+                    && (s.InvitedPhoneNumber == invitedE164
+                        || (currentHolderCustomerId != null && s.SharedWithCustomerId == currentHolderCustomerId)))));
+    }
+
+    public async Task<int> CountPendingInvitesAsync(Guid ownerCustomerId, DateTime pendingSince)
+    {
+        return await _context.VehicleShares.CountAsync(s => s.OwnerCustomerId == ownerCustomerId
+            && s.Status == VehicleShareStatus.Pending
+            && s.InvitedAt >= pendingSince);
+    }
+
+    public async Task<int> RespondAsync(Guid shareId, Guid responderCustomerId, string responderE164, bool accept, DateTime pendingSince, DateTime now)
+    {
+        // One UPDATE: only a live pending invite addressed to the responder's own number, never their own vehicle.
+        // A double tap or a race with Revoke changes nothing the second time.
+        var query = _context.VehicleShares.Where(s => s.ShareId == shareId
+            && s.Status == VehicleShareStatus.Pending
+            && s.InvitedAt >= pendingSince
+            && s.InvitedPhoneNumber == responderE164
+            && s.OwnerCustomerId != responderCustomerId
+            && s.Vehicle.IsActive);
+
+        return accept
+            ? await query.ExecuteUpdateAsync(u => u
+                .SetProperty(s => s.Status, VehicleShareStatus.Accepted)
+                .SetProperty(s => s.SharedWithCustomerId, (Guid?)responderCustomerId)
+                .SetProperty(s => s.RespondedAt, (DateTime?)now))
+            : await query.ExecuteUpdateAsync(u => u
+                .SetProperty(s => s.Status, VehicleShareStatus.Declined)
+                .SetProperty(s => s.RespondedAt, (DateTime?)now));
+    }
+
+    public async Task<int> RevokeAsync(Guid shareId, Guid ownerCustomerId, DateTime now)
+    {
+        return await _context.VehicleShares
+            .Where(s => s.ShareId == shareId
+                && s.OwnerCustomerId == ownerCustomerId
+                && (s.Status == VehicleShareStatus.Pending || s.Status == VehicleShareStatus.Accepted))
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(s => s.Status, VehicleShareStatus.Revoked)
+                .SetProperty(s => s.RespondedAt, (DateTime?)now));
     }
 
     public async Task<List<VehicleShare>> GetOwnedSharesAsync(Guid ownerCustomerId, Guid? vehicleId = null)
@@ -81,13 +119,17 @@ public class VehicleShareRepository : IVehicleShareRepository
             .ToListAsync();
     }
 
-    public async Task<List<VehicleShare>> GetPendingInvitesForAsync(Guid sharedWithCustomerId)
+    public async Task<List<VehicleShare>> GetPendingInvitesForAsync(Guid viewerCustomerId, string viewerE164, DateTime pendingSince)
     {
         return await _context.VehicleShares
             .AsNoTracking()
             .Include(s => s.Vehicle)
             .Include(s => s.OwnerCustomer)
-            .Where(s => s.SharedWithCustomerId == sharedWithCustomerId && s.Status == VehicleShareStatus.Pending)
+            .Where(s => s.InvitedPhoneNumber == viewerE164
+                        && s.Status == VehicleShareStatus.Pending
+                        && s.InvitedAt >= pendingSince
+                        && s.OwnerCustomerId != viewerCustomerId
+                        && s.Vehicle.IsActive)
             .OrderByDescending(s => s.InvitedAt)
             .ToListAsync();
     }
@@ -96,7 +138,9 @@ public class VehicleShareRepository : IVehicleShareRepository
     {
         return await _context.VehicleShares
             .AsNoTracking()
-            .Where(s => s.VehicleId == vehicleId && s.Status == VehicleShareStatus.Accepted)
+            .Where(s => s.VehicleId == vehicleId
+                        && s.Status == VehicleShareStatus.Accepted
+                        && s.SharedWithCustomerId != null)
             .ToListAsync();
     }
 }

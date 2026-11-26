@@ -652,9 +652,10 @@ public class LocationNotificationListener : BackgroundService
 
             foreach (var share in acceptedShares)
             {
+                if (share.SharedWithCustomerId is not Guid viewerId) continue;
                 try
                 {
-                    await pushService.SendAlertPushAsync(share.SharedWithCustomerId, title, alert.Message);
+                    await pushService.SendAlertPushAsync(viewerId, title, alert.Message);
                 }
                 catch (Exception ex)
                 {
