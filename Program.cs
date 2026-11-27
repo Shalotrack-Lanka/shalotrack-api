@@ -144,6 +144,9 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 // ---- REAL-TIME PUSH (Option B) ----
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<LocationNotificationListener>();
+// Re-checks live-group access once a minute, so a revoked share stops receiving positions (see LiveAccessSweeper).
+builder.Services.AddSingleton<ShaloTrack_API.Hubs.LiveGroupRegistry>();
+builder.Services.AddHostedService<LiveAccessSweeper>();
 
 // ---- FCM PUSH ----
 var firebaseServiceAccountJson = builder.Configuration["Firebase:ServiceAccountJson"]
